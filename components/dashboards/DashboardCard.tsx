@@ -10,16 +10,16 @@ interface DashboardCardProps {
 
 export const DashboardCard: React.FC<DashboardCardProps> = ({ title, description, icon, onClick, color = 'blue' }) => {
     const colorClasses = {
-        blue: 'bg-blue-50 text-blue-800 hover:border-blue-500 hover:bg-blue-100/80',
-        green: 'bg-green-50 text-green-800 hover:border-green-500 hover:bg-green-100/80',
-        yellow: 'bg-yellow-50 text-yellow-800 hover:border-yellow-500 hover:bg-yellow-100/80',
-        purple: 'bg-purple-50 text-purple-800 hover:border-purple-500 hover:bg-purple-100/80',
+        blue: 'bg-white text-slate-900 border border-slate-200 hover:border-blue-500 hover:bg-slate-50',
+        green: 'bg-white text-slate-900 border border-slate-200 hover:border-emerald-500 hover:bg-slate-50',
+        yellow: 'bg-white text-slate-900 border border-slate-200 hover:border-amber-500 hover:bg-slate-50',
+        purple: 'bg-white text-slate-900 border border-slate-200 hover:border-purple-500 hover:bg-slate-50',
     };
     const iconColorClasses = {
-        blue: 'bg-blue-100 text-blue-600',
-        green: 'bg-green-100 text-green-600',
-        yellow: 'bg-yellow-100 text-yellow-600',
-        purple: 'bg-purple-100 text-purple-600',
+        blue: 'bg-blue-50 text-blue-600',
+        green: 'bg-emerald-50 text-emerald-600',
+        yellow: 'bg-amber-50 text-amber-600',
+        purple: 'bg-purple-50 text-purple-600',
     };
 
     return (

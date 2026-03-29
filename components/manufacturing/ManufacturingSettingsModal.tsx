@@ -5,7 +5,7 @@ import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { Select } from '../ui/Select';
 import { WorkStation, Consumable, StandardOperation, ManufacturingHook, OperationConsumable } from '../../types';
-import { nanoid } from 'https://esm.sh/nanoid@5.0.7';
+import { nanoid } from 'nanoid';
 
 interface ManufacturingSettingsModalProps {
     isOpen: boolean;
@@ -13,7 +13,10 @@ interface ManufacturingSettingsModalProps {
     manufacturing: ManufacturingHook;
 }
 
-const formatCurrency = (value: number) => (value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const formatCurrency = (value: number | undefined | null) => {
+    if (value === undefined || value === null || isNaN(Number(value))) return 'R$ 0,00';
+    return Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+};
 
 export const ManufacturingSettingsModal: React.FC<ManufacturingSettingsModalProps> = ({ isOpen, onClose, manufacturing }) => {
     const { 

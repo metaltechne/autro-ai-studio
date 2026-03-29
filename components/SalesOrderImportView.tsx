@@ -148,13 +148,16 @@ export const SalesOrderImportView: React.FC<SalesOrderImportViewProps> = ({ inve
             if (lines.length < 2) throw new Error("Arquivo CSV vazio ou sem dados.");
             
             const header = lines[0].split(';').map(h => h.trim().replace(/"/g, ''));
-            const requiredHeaders = ["Código do produto", "Descrição", "Quantidade", "Localização", "Cliente", "Número do Pedido"];
+            const requiredHeaders = ["Código do produto", "Descrição", "Quantidade", "Localização"];
             const headerIndices: Record<string, number> = {};
             requiredHeaders.forEach(h => { headerIndices[h] = header.indexOf(h) });
             
             if (Object.values(headerIndices).some(i => i === -1)) {
                 throw new Error(`Cabeçalho do CSV inválido. Faltando colunas: ${requiredHeaders.filter(h => header.indexOf(h) === -1).join(', ')}`);
             }
+
+            const clienteIdx = header.indexOf("Cliente");
+            const pedidoIdx = header.indexOf("Número do Pedido");
 
             const rawItems: RawCsvItem[] = lines.slice(1).map(line => {
                 const columns = line.split(';').map(col => col.trim().replace(/"/g, ''));
@@ -177,8 +180,8 @@ export const SalesOrderImportView: React.FC<SalesOrderImportViewProps> = ({ inve
                         name: description,
                         quantity,
                         composition: columns[headerIndices["Localização"]],
-                        customer: columns[headerIndices["Cliente"]],
-                        orderId: columns[headerIndices["Número do Pedido"]],
+                        customer: clienteIdx !== -1 && columns[clienteIdx] ? columns[clienteIdx] : 'Cliente Padrão',
+                        orderId: pedidoIdx !== -1 && columns[pedidoIdx] ? columns[pedidoIdx] : `PEDIDO-${new Date().getTime()}`,
                         marca,
                         modelo,
                         ano,
@@ -279,7 +282,7 @@ export const SalesOrderImportView: React.FC<SalesOrderImportViewProps> = ({ inve
 
     const keyComponents = useMemo(() => {
         return inventory.components
-            .filter(c => c.familiaId === 'fam-chave-p' || c.familiaId === 'fam-chave-s')
+            .filter(c => c.familiaId?.startsWith('fam-chave'))
             .sort((a, b) => a.name.localeCompare(b.name));
     }, [inventory.components]);
 
@@ -314,26 +317,56 @@ export const SalesOrderImportView: React.FC<SalesOrderImportViewProps> = ({ inve
     
     const handleCreateMissingKits = async () => {
         setIsProcessing(true);
-        const kitsToCreateList = Array.from(kitsToCreate.values());
-        
-        if (kitsToCreateList.length > 0) {
-            await inventory.addMultipleKits(kitsToCreateList);
-        }
+        try {
+            const kitsToCreateData = Array.from(kitsToCreate.values()) as KitImportData[];
+            let kitsToCreateList: Kit[] = [];
+            
+            if (kitsToCreateData.length > 0) {
+                kitsToCreateList = kitsToCreateData.map(item => {
+                    const components = item['Componentes (SKU:Qtd)'].split(',').map(part => {
+                        const [sku, qtyStr] = part.split(':').map(s => s.trim());
+                        return { componentSku: sku, quantity: parseInt(qtyStr, 10) || 1 };
+                    }).filter(c => c.componentSku);
 
-        await new Promise(resolve => setTimeout(resolve, 500));
-        const newKits = await inventory.getKits();
-        
-        const createdOrderItems: ProductionOrderItem[] = kitsToCreateList.map((k: KitImportData) => {
-            const newKit = newKits.find(nk => nk.sku === k.SKU);
-            return { kitId: newKit!.id, quantity: aggregatedCsvItems.get(k.SKU)!.quantity };
-        });
-        
-        const nextOrderItems = [...finalOrderItems, ...createdOrderItems];
-        setFinalOrderItems(nextOrderItems);
-        
-        setStage('analyzing');
-        handleStartAnalysis(nextOrderItems);
-        setIsProcessing(false);
+                    const fasteners = item['Fixadores (Dimensao:Qtd)'].split(',').map(part => {
+                        const [dim, qtyStr] = part.split(':').map(s => s.trim());
+                        return { dimension: dim, quantity: parseInt(qtyStr, 10) || 1 };
+                    }).filter(f => f.dimension);
+
+                    return {
+                        id: `kit-${item.SKU}-${Date.now()}`,
+                        name: item['Nome do Kit'],
+                        sku: item.SKU,
+                        marca: item.Marca,
+                        modelo: item.Modelo,
+                        ano: item.Ano,
+                        components,
+                        requiredFasteners: fasteners,
+                        sellingPriceOverride: item['Preco de Venda (Opcional)'],
+                    };
+                });
+                await inventory.addMultipleKits(kitsToCreateList);
+            }
+
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            const createdOrderItems: ProductionOrderItem[] = kitsToCreateList.map((k: Kit) => {
+                return { kitId: k.id, quantity: aggregatedCsvItems.get(k.sku)!.quantity };
+            });
+            
+            const nextOrderItems = [...finalOrderItems, ...createdOrderItems];
+            setFinalOrderItems(nextOrderItems);
+            
+            setStage('analyzing');
+            handleStartAnalysis(nextOrderItems);
+        } catch (error) {
+            console.error("Error creating missing kits:", error);
+            addToast('Erro ao criar kits faltantes.', 'error');
+            setErrorMessage(error instanceof Error ? error.message : 'Erro desconhecido');
+            setStage('error');
+        } finally {
+            setIsProcessing(false);
+        }
     };
 
     const handleStartAnalysis = (order: ProductionOrderItem[]) => {
@@ -349,38 +382,46 @@ export const SalesOrderImportView: React.FC<SalesOrderImportViewProps> = ({ inve
             setStage('error');
             return;
         }
-        const result = inventory.analyzeProductionRun(order, extraItems, manufacturing.familias, inventory.components, financialSettings);
-        setAnalysisModalData(result);
+        
+        try {
+            const result = inventory.analyzeProductionRun(order, extraItems, manufacturing.familias, inventory.components, financialSettings);
+            setAnalysisModalData(result);
+        } catch (error) {
+            console.error("Error analyzing production run:", error);
+            setErrorMessage(error instanceof Error ? error.message : "Erro desconhecido ao analisar a produção.");
+            setStage('error');
+        }
     };
     
     const handleCreateProductionOrder = async (scenario: ProductionScenario) => {
         if (!analysisModalData) return;
         setIsProcessing(true);
         
-        const extraItemsNotes = extraItems.map((item: { componentId: string; quantity: number; }) => { const comp = inventory.findComponentById(item.componentId); return `${item.quantity}x ${comp?.name || 'Item desconhecido'} (SKU: ${comp?.sku || 'N/A'})`; }).join('\n');
-        
-        let finalNotes = `Importado do pedido para ${customerInfo.name} (Pedido: ${customerInfo.orderId}).`;
-        if (mismatchWarning) {
-            finalNotes += `\n\n---\n${mismatchWarning}`;
-        }
-        if (extraItems.length > 0) {
-            finalNotes += `\n\nItens extras:\n${extraItemsNotes}`;
-        }
+        try {
+            const extraItemsNotes = extraItems.map((item: { componentId: string; quantity: number; }) => { const comp = inventory.findComponentById(item.componentId); return `${item.quantity}x ${comp?.name || 'Item desconhecido'} (SKU: ${comp?.sku || 'N/A'})`; }).join('\n');
+            
+            let finalNotes = `Importado do pedido para ${customerInfo.name} (Pedido: ${customerInfo.orderId}).`;
+            if (mismatchWarning) {
+                finalNotes += `\n\n---\n${mismatchWarning}`;
+            }
+            if (extraItems.length > 0) {
+                finalNotes += `\n\nItens extras:\n${extraItemsNotes}`;
+            }
 
-        const newOrderId = await productionOrdersHook.addProductionOrder({
-            orderItems: finalOrderItems,
-            selectedScenario: scenario,
-            virtualComponents: analysisModalData?.virtualComponents || [],
-            notes: finalNotes,
-            customerId: customerInfo.customerId,
-            scannedItems: {},
-            substitutions: {},
-            installments: []
-        });
+            const newOrderId = await productionOrdersHook.addProductionOrder({
+                orderItems: finalOrderItems,
+                selectedScenario: scenario,
+                virtualComponents: analysisModalData?.virtualComponents || [],
+                notes: finalNotes,
+                customerId: customerInfo.customerId,
+                scannedItems: {},
+                substitutions: {},
+                installments: []
+            });
 
-        if (newOrderId) {
-            setOrderCreatedId(newOrderId);
-            addToast(`Ordem de Montagem ${newOrderId} criada!`, 'success');
+            if (newOrderId) {
+                setOrderCreatedId(newOrderId);
+                addToast(`Ordem de Montagem ${newOrderId} criada!`, 'success');
 
             const shortages = scenario.shortages;
             if (shortages.length > 0) {
@@ -410,7 +451,18 @@ export const SalesOrderImportView: React.FC<SalesOrderImportViewProps> = ({ inve
                 
                 let manufacturingOrderAnalysis: ManufacturingAnalysis | null = null;
                 if (toManufacture.length > 0) {
-                    const moItems = toManufacture.map(s => ({ componentId: s.componentId, quantity: s.shortage }));
+                    const moItems = toManufacture.map(s => {
+                        let component = inventory.findComponentById(s.componentId);
+                        if (!component && s.componentId.startsWith('comp-virtual-')) {
+                            component = analysisModalData?.virtualComponents.find(vc => vc.id === s.componentId);
+                        }
+                        return { 
+                            componentId: s.componentId, 
+                            quantity: s.shortage,
+                            name: s.componentName,
+                            sku: component?.sku || s.componentId.replace('comp-virtual-', '')
+                        };
+                    });
                     manufacturingOrderAnalysis = manufacturing.analyzeManufacturingRun(moItems, inventory.components, analysisModalData.virtualComponents);
                     const newMoId = await manufacturingOrdersHook.addManufacturingOrder(moItems, manufacturingOrderAnalysis);
                     if (newMoId) {
@@ -424,12 +476,18 @@ export const SalesOrderImportView: React.FC<SalesOrderImportViewProps> = ({ inve
                 
                 // 1. Adiciona compras diretas (Tampas, Parafusos Comprados, etc.)
                 directToPurchase.forEach(s => {
-                    const component = inventory.findComponentById(s.componentId)!;
-                    purchaseMap.set(s.componentId, {
-                        componentId: s.componentId, name: s.componentName, sku: component.sku,
-                        sourcing: component.sourcing || 'purchased', required: s.required, inStock: s.available,
-                        toOrder: s.shortage, abcClass: 'C',
-                    });
+                    let component = inventory.findComponentById(s.componentId);
+                    if (!component) {
+                        component = analysisModalData?.virtualComponents.find(vc => vc.id === s.componentId);
+                    }
+                    
+                    if (component) {
+                        purchaseMap.set(s.componentId, {
+                            componentId: s.componentId, name: s.componentName, sku: component.sku,
+                            sourcing: component.sourcing || 'purchased', required: s.required, inStock: s.available,
+                            toOrder: s.shortage, abcClass: 'C',
+                        });
+                    }
                 });
     
                 // 2. Adiciona matérias-primas exigidas pela Ordem de Fabricação
@@ -438,17 +496,23 @@ export const SalesOrderImportView: React.FC<SalesOrderImportViewProps> = ({ inve
                         .filter(req => req.shortage > 0 && req.type !== 'etapaFabricacao');
                     
                     manufacturingShortages.forEach(req => {
-                        const component = inventory.findComponentById(req.id)!;
-                        const existingRec = purchaseMap.get(req.id);
-                        if (existingRec) {
-                            existingRec.toOrder += req.shortage;
-                            existingRec.required += req.quantity;
-                        } else {
-                            purchaseMap.set(req.id, {
-                                componentId: req.id, name: req.name, sku: component.sku,
-                                sourcing: component.sourcing || 'purchased', required: req.quantity, inStock: req.stock,
-                                toOrder: req.shortage, abcClass: 'C',
-                            });
+                        let component = inventory.findComponentById(req.id);
+                        if (!component) {
+                            component = analysisModalData?.virtualComponents.find(vc => vc.id === req.id);
+                        }
+                        
+                        if (component) {
+                            const existingRec = purchaseMap.get(req.id);
+                            if (existingRec) {
+                                existingRec.toOrder += req.shortage;
+                                existingRec.required += req.quantity;
+                            } else {
+                                purchaseMap.set(req.id, {
+                                    componentId: req.id, name: req.name, sku: component.sku,
+                                    sourcing: component.sourcing || 'purchased', required: req.quantity, inStock: req.stock,
+                                    toOrder: req.shortage, abcClass: 'C',
+                                });
+                            }
                         }
                     });
                 }
@@ -473,9 +537,15 @@ export const SalesOrderImportView: React.FC<SalesOrderImportViewProps> = ({ inve
             setErrorMessage("Falha ao criar a ordem de produção.");
             setStage('error');
         }
-        
-        setIsProcessing(false);
-        setAnalysisModalData(null);
+        } catch (error) {
+            console.error("Error creating production order:", error);
+            addToast('Erro inesperado ao criar ordem de montagem.', 'error');
+            setErrorMessage(error instanceof Error ? error.message : 'Erro desconhecido');
+            setStage('error');
+        } finally {
+            setIsProcessing(false);
+            setAnalysisModalData(null);
+        }
     };
     
     const renderIdle = () => (
@@ -513,6 +583,12 @@ export const SalesOrderImportView: React.FC<SalesOrderImportViewProps> = ({ inve
 
     const renderPromptForKeys = () => (
         <Card>
+            {mismatchWarning && (
+                <div className="mb-6 p-4 bg-yellow-50 border-l-4 border-yellow-400 text-yellow-800 rounded-r-md">
+                    <h4 className="font-bold mb-2">Atenção: Diferença de Composição</h4>
+                    <p className="text-sm whitespace-pre-wrap">{mismatchWarning}</p>
+                </div>
+            )}
             <h3 className="text-xl font-semibold text-black mb-2">Adicionar Chaves ao Pedido</h3>
             <p className="text-sm text-gray-600 mb-4">Selecione as chaves e as quantidades que serão enviadas para este cliente junto com o pedido.</p>
             

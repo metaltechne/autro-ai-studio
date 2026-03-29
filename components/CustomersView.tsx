@@ -9,7 +9,10 @@ import { EmptyState } from './ui/EmptyState';
 import { FinancialManagementModal } from './ui/FinancialManagementModal';
 
 const formatDateTime = (isoString: string) => new Date(isoString).toLocaleDateString('pt-BR', { timeZone: 'UTC' });
-const formatCurrency = (value: number) => value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const formatCurrency = (value: number | undefined | null) => {
+    if (value === undefined || value === null || isNaN(Number(value))) return 'R$ 0,00';
+    return Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+};
 
 interface CustomersViewProps {
     customersHook: CustomersHook;
@@ -39,7 +42,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({ customersHook, pro
         if (!searchTerm) return customers;
         const lowerSearch = searchTerm.toLowerCase();
         return customers.filter(c =>
-            c.name.toLowerCase().includes(lowerSearch) ||
+            (c.name || '').toLowerCase().includes(lowerSearch) ||
             (c.document && c.document.toLowerCase().includes(lowerSearch)) ||
             (c.email && c.email.toLowerCase().includes(lowerSearch))
         );

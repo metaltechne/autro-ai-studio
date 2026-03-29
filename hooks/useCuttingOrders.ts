@@ -6,7 +6,7 @@ import { useToast } from './useToast';
 import { useActivityLog } from '../contexts/ActivityLogContext';
 // Fix: Import getComponentCost and parseFastenerSku from shared evaluator.
 import { getComponentCost, parseFastenerSku } from './manufacturing-evaluator';
-import { nanoid } from 'https://esm.sh/nanoid@5.0.7';
+import { nanoid } from 'nanoid';
 
 interface CuttingOrdersHookProps {
     inventoryHook: InventoryHook;
@@ -238,6 +238,20 @@ export const useCuttingOrders = ({ inventoryHook }: CuttingOrdersHookProps): Cut
         }
     }, [addToast, loadData]);
 
+    const updateMultipleCuttingOrders = useCallback(async (ordersToUpdate: CuttingOrder[]) => {
+        try {
+            const currentOrders = await api.getCuttingOrders();
+            const updateMap = new Map(ordersToUpdate.map(o => [o.id, o]));
+            const newOrders = currentOrders.map(o => updateMap.get(o.id) || o);
+            await api.saveCuttingOrders(newOrders);
+            await addActivityLog(`Atualizou ${ordersToUpdate.length} ordens de corte via planilha.`);
+            await loadData();
+        } catch (e) {
+            console.error("Failed to batch update cutting orders:", e);
+            throw e;
+        }
+    }, [addActivityLog, loadData]);
+
     const deleteCuttingOrder = useCallback(async (orderId: string) => {
         const currentOrders = await api.getCuttingOrders();
         const orderToDelete = currentOrders.find(o => o.id === orderId);
@@ -263,6 +277,7 @@ export const useCuttingOrders = ({ inventoryHook }: CuttingOrdersHookProps): Cut
         finishCuttingOrder,
         addMultipleCuttingOrders,
         updateCuttingOrder,
+        updateMultipleCuttingOrders,
         deleteCuttingOrder,
     };
 };

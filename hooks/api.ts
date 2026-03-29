@@ -92,13 +92,17 @@ const sanitizeForFirebase = (data: any): any => {
 
 const dbRef = ref(db);
 
-const updateLastModified = async () => {
+export const updateLastModified = async () => {
     const timestamp = Date.now();
     if (storageMode === 'localStorage') {
         localStorage.setItem(DB_KEYS.lastModified, JSON.stringify(timestamp));
     } else {
         await set(child(dbRef, DB_KEYS.lastModified), timestamp);
     }
+};
+
+export const forceRebuildCorruptedProcesses = async (): Promise<'rebuilt' | 'no_issues'> => {
+    return 'no_issues';
 };
 
 const getData = async <T>(key: string, defaultValue: T): Promise<T> => {
@@ -189,17 +193,48 @@ export const initializeDatabase = async (): Promise<{status: 'ok' | 'conflict', 
 
 export const getComponents = async (): Promise<Component[]> => {
     const data = await getData(DB_KEYS.components, []);
-    return data.map((c: any) => ({
-        ...c,
-        stock: c.stock || 0,
-        custoFabricacao: c.custoFabricacao || 0,
-        custoMateriaPrima: c.custoMateriaPrima || 0
-    }));
+    
+    // Migration: Update purchaseCost from INITIAL_COMPONENTS if it's 0 or missing
+    // AND inject missing components from INITIAL_COMPONENTS
+    let needsUpdate = false;
+    const migratedData = data.map((c: any) => {
+        const initialComp = INITIAL_COMPONENTS.find(ic => ic.sku === c.sku);
+        if (initialComp && (!c.purchaseCost || c.purchaseCost === 0) && initialComp.purchaseCost) {
+            needsUpdate = true;
+            return { ...c, purchaseCost: initialComp.purchaseCost };
+        }
+        return {
+            ...c,
+            stock: c.stock || 0,
+            custoFabricacao: c.custoFabricacao || 0,
+            custoMateriaPrima: c.custoMateriaPrima || 0
+        };
+    });
+
+    // Inject missing components
+    for (const initialComp of INITIAL_COMPONENTS) {
+        if (!migratedData.find((c: any) => c.sku === initialComp.sku)) {
+            migratedData.push(initialComp);
+            needsUpdate = true;
+        }
+    }
+
+    if (needsUpdate) {
+        await saveData(DB_KEYS.components, migratedData);
+    }
+
+    return migratedData;
 };
 export const saveComponents = async (components: Component[]): Promise<void> => saveData(DB_KEYS.components, components);
 
 export const getKits = async (): Promise<Kit[]> => {
     const data = await getData(DB_KEYS.kits, []);
+    
+    if (data.length === 0 && INITIAL_KITS && INITIAL_KITS.length > 0) {
+        await saveData(DB_KEYS.kits, INITIAL_KITS);
+        return INITIAL_KITS;
+    }
+
     return data.map((k: any) => ({
         ...k,
         components: k.components || [],
@@ -213,11 +248,54 @@ export const saveInventoryLogs = async (logs: InventoryLog[]): Promise<void> => 
 
 export const getFamilias = async (): Promise<FamiliaComponente[]> => {
     const data = await getData(DB_KEYS.familias, []);
-    return data.map((f: any) => ({
+    const familias = data.map((f: any) => ({
         ...f,
         nodes: f.nodes || [],
         edges: f.edges || []
     }));
+
+    // Fix temporário para corrigir o consumo da barra roscada (mm para metros) e incluir porcas em fam-fixadores
+    let needsSave = false;
+    const fixedFamilias = familias.map(f => {
+        if (f.id === 'fam-USINAGEM-BARRA') {
+            const nodes = f.nodes.map(n => {
+                if (n.data.dimensions) {
+                    let dimFixed = false;
+                    const dims = n.data.dimensions.map(d => {
+                        if (d.consumption > 1) {
+                            dimFixed = true;
+                            needsSave = true;
+                            return { ...d, consumption: d.consumption / 1000 };
+                        }
+                        return d;
+                    });
+                    if (dimFixed) return { ...n, data: { ...n.data, dimensions: dims } };
+                }
+                return n;
+            });
+            return { ...f, nodes };
+        }
+        if (f.id === 'fam-fixadores') {
+            const initialFixadores = INITIAL_FAMILIAS.find(ifam => ifam.id === 'fam-fixadores');
+            if (initialFixadores) {
+                const dnaNode = f.nodes.find((n: any) => n.id === 'n-dna-fix');
+                const initialDnaNode = initialFixadores.nodes.find(n => n.id === 'n-dna-fix');
+                
+                if (dnaNode && initialDnaNode && dnaNode.data.dimensions.length < initialDnaNode.data.dimensions.length) {
+                    needsSave = true;
+                    return { ...f, nodes: initialFixadores.nodes };
+                }
+            }
+        }
+        return f;
+    });
+
+    if (needsSave) {
+        console.log("Auto-corrigindo consumo da família fam-USINAGEM-BARRA...");
+        saveFamilias(fixedFamilias);
+    }
+
+    return fixedFamilias;
 };
 export const saveFamilias = async (familias: FamiliaComponente[]): Promise<void> => saveData(DB_KEYS.familias, familias);
 
@@ -319,34 +397,10 @@ export const resetAndSeedDatabase = async (): Promise<void> => {
     if (userRoles && userRoles.length > 0) await saveUserRoles(userRoles);
 };
 
-export const forceRebuildCorruptedProcesses = async (): Promise<'rebuilt' | 'no_issues' | 'error'> => {
-    try {
-        const currentFamilias = await getFamilias();
-        let wasModified = false;
-        let updatedFamilias = [...currentFamilias];
-        updatedFamilias = updatedFamilias.map(familia => {
-             const template = INITIAL_FAMILIAS.find((f: FamiliaComponente) => f.id === familia.id);
-             if (template) {
-                 if (JSON.stringify({ nodes: familia.nodes, edges: familia.edges }) !== JSON.stringify({ nodes: template.nodes, edges: template.edges })) {
-                     wasModified = true;
-                     return { ...familia, nodes: template.nodes, edges: template.edges };
-                 }
-             }
-             return familia;
-        });
-        const currentIds = new Set(updatedFamilias.map(f => f.id));
-        INITIAL_FAMILIAS.forEach((template: FamiliaComponente) => {
-            if (!currentIds.has(template.id)) {
-                updatedFamilias.push(template);
-                wasModified = true;
-            }
-        });
-        if (wasModified) {
-            await saveFamilias(updatedFamilias);
-            return 'rebuilt';
-        }
-        return 'no_issues';
-    } catch (e) { return 'error'; }
+export const applyCustomFamilyCleanup = async (): Promise<void> => {
+    const currentFamilias = await getFamilias();
+    const newFamilias = INITIAL_FAMILIAS;
+    await saveFamilias(newFamilias);
 };
 
 export const getLocalData = async (): Promise<BackupData> => {

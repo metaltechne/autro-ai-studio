@@ -37,15 +37,15 @@ export const KitEditModal: React.FC<KitEditModalProps> = ({ isOpen, onClose, onS
   const [newFastenerQty, setNewFastenerQty] = useState(1);
 
   const { components: allComponents } = inventory;
-  const componentSkuMap = useMemo(() => new Map(allComponents.map(c => [c.sku, c])), [allComponents]);
+  const componentSkuMap = useMemo(() => new Map(allComponents.map(c => [c.sku.toUpperCase(), c])), [allComponents]);
 
   // Separate component lists for dropdowns
   const standardComponents = useMemo(() => allComponents.filter(c => c.familiaId !== 'fam-embalagens').sort((a,b) => a.name.localeCompare(b.name)), [allComponents]);
   const packagingComponents = useMemo(() => allComponents.filter(c => c.familiaId === 'fam-embalagens').sort((a,b) => a.name.localeCompare(b.name)), [allComponents]);
 
   // Separate component lists for display within the kit
-  const kitStandardComponents = useMemo(() => kitData.components.filter((kc: KitComponent) => (componentSkuMap.get(kc.componentSku) as Component | undefined)?.familiaId !== 'fam-embalagens'), [kitData.components, componentSkuMap]);
-  const kitPackagingComponents = useMemo(() => kitData.components.filter((kc: KitComponent) => (componentSkuMap.get(kc.componentSku) as Component | undefined)?.familiaId === 'fam-embalagens'), [kitData.components, componentSkuMap]);
+  const kitStandardComponents = useMemo(() => kitData.components.filter((kc: KitComponent) => (componentSkuMap.get(kc.componentSku.toUpperCase()) as Component | undefined)?.familiaId !== 'fam-embalagens'), [kitData.components, componentSkuMap]);
+  const kitPackagingComponents = useMemo(() => kitData.components.filter((kc: KitComponent) => (componentSkuMap.get(kc.componentSku.toUpperCase()) as Component | undefined)?.familiaId === 'fam-embalagens'), [kitData.components, componentSkuMap]);
 
 
   useEffect(() => {
@@ -166,7 +166,7 @@ export const KitEditModal: React.FC<KitEditModalProps> = ({ isOpen, onClose, onS
             <h4 className="text-md font-semibold mb-2 text-black">Componentes Padrão (Copos, Tampas, etc.)</h4>
             <div className="space-y-2 mb-4">
                 {kitStandardComponents.map((kc: KitComponent) => {
-                    const component = componentSkuMap.get(kc.componentSku) as Component | undefined;
+                    const component = componentSkuMap.get(kc.componentSku.toUpperCase()) as Component | undefined;
                     return (
                         <div key={kc.componentSku} className="flex items-center justify-between bg-gray-50 p-2 rounded">
                              <div>
@@ -203,7 +203,7 @@ export const KitEditModal: React.FC<KitEditModalProps> = ({ isOpen, onClose, onS
             <h4 className="text-md font-semibold mb-2 text-black">Itens de Embalagem</h4>
             <div className="space-y-2 mb-4">
                 {kitPackagingComponents.map((kc: KitComponent) => {
-                    const component = componentSkuMap.get(kc.componentSku) as Component | undefined;
+                    const component = componentSkuMap.get(kc.componentSku.toUpperCase()) as Component | undefined;
                     return (
                         <div key={kc.componentSku} className="flex items-center justify-between bg-gray-50 p-2 rounded">
                             <div>

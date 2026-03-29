@@ -28,7 +28,10 @@ interface CalendarEvent {
     status?: 'pendente' | 'pago';
 }
 
-const formatCurrency = (value: number) => value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const formatCurrency = (value: number | undefined | null) => {
+    if (value === undefined || value === null || isNaN(Number(value))) return 'R$ 0,00';
+    return Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+};
 const formatDate = (date: Date) => date.toLocaleDateString('pt-BR', { timeZone: 'UTC' });
 
 const monthNames = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
@@ -133,7 +136,7 @@ export const PaymentCalendarView: React.FC<PaymentCalendarViewProps> = ({ manufa
                 if (filterStatus === 'pendente' && event.isOverdue) return false;
             }
 
-            if (searchTerm && !event.orderId.toLowerCase().includes(searchTerm.toLowerCase())) {
+            if (searchTerm && !(event.orderId || '').toLowerCase().includes(searchTerm.toLowerCase())) {
                 return false;
             }
             return true;

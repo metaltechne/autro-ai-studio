@@ -11,13 +11,14 @@ import {
     Component, 
     ManufacturingOrderItem, 
     ManufacturingAnalysis, 
+    CostStep,
     AggregatedManufacturingRequirement,
     GenerationConfig,
     ProcessDimension,
     ProcessHeadCode
 } from '../types';
 import { applyNodeChanges, applyEdgeChanges, addEdge, Connection, EdgeChange, NodeChange, Node, Edge } from 'reactflow';
-import { nanoid } from 'https://esm.sh/nanoid@5.0.7';
+import { nanoid } from 'nanoid';
 import * as api from './api';
 import { evaluateProcess, parseFastenerSku, ProcessRequirement } from './manufacturing-evaluator';
 
@@ -60,6 +61,7 @@ export const useManufacturing = (): ManufacturingHook => {
 
     const saveChanges = useCallback(async () => {
         setSavingStatus('saving');
+        setIsDirty(false);
         try {
             await Promise.all([
                 api.saveFamilias(familias),
@@ -67,7 +69,6 @@ export const useManufacturing = (): ManufacturingHook => {
                 api.saveConsumables(consumables),
                 api.saveStandardOperations(standardOperations)
             ]);
-            setIsDirty(false);
             setSavingStatus('saved');
             setTimeout(() => setSavingStatus('idle'), 2000);
         } catch (error) {
@@ -75,6 +76,27 @@ export const useManufacturing = (): ManufacturingHook => {
             setSavingStatus('idle');
         }
     }, [familias, workStations, consumables, standardOperations]);
+
+    useEffect(() => {
+        const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+            if (isDirty) {
+                saveChanges();
+                e.preventDefault();
+                e.returnValue = '';
+            }
+        };
+        window.addEventListener('beforeunload', handleBeforeUnload);
+        return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+    }, [isDirty, saveChanges]);
+
+    useEffect(() => {
+        if (isDirty) {
+            const timer = setTimeout(() => {
+                saveChanges();
+            }, 2000); // Debounce de 2 segundos
+            return () => clearTimeout(timer);
+        }
+    }, [isDirty, saveChanges]);
 
     const getActiveFamilia = useCallback(() => familias.find(f => f.id === activeFamiliaId), [familias, activeFamiliaId]);
 
@@ -327,7 +349,7 @@ export const useManufacturing = (): ManufacturingHook => {
         const codes = new Set<string>();
         familias.forEach(f => {
             f.nodes.forEach(n => {
-                if (n.data.type === 'headCodeTable' && n.data.headCodes) {
+                if ((n.data.type === 'headCodeTable' || n.data.type === 'codificationTable' || n.data.type === 'codificationTableNode') && n.data.headCodes) {
                     n.data.headCodes.forEach(hc => codes.add(hc.code));
                 }
             });
@@ -338,6 +360,9 @@ export const useManufacturing = (): ManufacturingHook => {
     const analyzeManufacturingRun = useCallback((order: ManufacturingOrderItem[], allComponents: Component[], virtualComponents?: Component[]): ManufacturingAnalysis => {
         let totalCost = 0;
         const requirements: AggregatedManufacturingRequirement[] = [];
+        const detailedBreakdown: CostStep[] = [];
+        const manufacturingSteps: CostStep[] = [];
+
         order.forEach(item => {
             const component = allComponents.find(c => c.id === item.componentId) || virtualComponents?.find(c => c.id === item.componentId);
             if (!component || !component.familiaId) return;
@@ -352,21 +377,55 @@ export const useManufacturing = (): ManufacturingHook => {
                 sVars.headCode = skuInfo.head; sVars.dimensao = `${skuInfo.bitola}x${skuInfo.comprimento}`;
             }
             const evalRes = evaluateProcess(familia, pVars, allComponents, sVars, { workStations, operations: standardOperations, consumables, allFamilias: familias });
-            totalCost += (evalRes.custoMateriaPrima + evalRes.custoFabricacao) * item.quantity;
+            const itemTotal = (evalRes.custoMateriaPrima + evalRes.custoFabricacao) * item.quantity;
+            totalCost += itemTotal;
+
+            detailedBreakdown.push({
+                name: `${item.quantity}x ${component.name}`,
+                type: 'product',
+                cost: itemTotal,
+                details: `SKU: ${component.sku}`
+            });
+
+            evalRes.costBreakdown.forEach(step => {
+                if (step.type === 'labor') {
+                    manufacturingSteps.push({
+                        name: `${item.quantity}x ${step.name} (${component.name})`,
+                        type: 'labor',
+                        cost: step.cost * item.quantity,
+                        timeSeconds: (step.timeSeconds || 0) * item.quantity,
+                        quantity: item.quantity,
+                        details: `SKU: ${component.sku}`
+                    });
+                }
+            });
+
             evalRes.requirements.forEach((req: ProcessRequirement) => {
                 const totalNeeded = req.quantity * item.quantity;
                 const existing = requirements.find(r => r.id === req.id);
                 const comp = allComponents.find(c => c.id === req.id);
                 const stock = comp?.stock || 0;
+                const familiaId = req.familiaId || comp?.familiaId;
+
                 if (existing) {
                     existing.quantity += totalNeeded;
                     existing.shortage = Math.max(0, existing.quantity - existing.stock);
+                    if (!existing.familiaId) existing.familiaId = familiaId;
                 } else {
-                    requirements.push({ id: req.id, name: req.name, type: req.type as any, quantity: totalNeeded, unit: req.unit, stock, shortage: Math.max(0, totalNeeded - stock) });
+                    requirements.push({ 
+                        id: req.id, 
+                        name: req.name, 
+                        type: req.type as any, 
+                        quantity: totalNeeded, 
+                        unit: req.unit, 
+                        stock, 
+                        shortage: Math.max(0, totalNeeded - stock),
+                        familiaId
+                    });
                 }
             });
         });
-        return { isFeasible: requirements.every(r => r.shortage <= 0.001), totalCost, requirements };
+        return { isFeasible: requirements.every(r => r.shortage <= 0.001), totalCost, requirements, detailedBreakdown, manufacturingSteps };
     }, [familias, workStations, standardOperations, consumables]);
 
     return {

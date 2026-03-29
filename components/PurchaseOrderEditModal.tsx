@@ -14,9 +14,9 @@ interface PurchaseOrderEditModalProps {
   inventory: InventoryHook;
 }
 
-const formatCurrency = (value: number | undefined) => {
-    if (typeof value !== 'number') return 'R$ 0,00';
-    return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const formatCurrency = (value: number | undefined | null) => {
+    if (value === undefined || value === null || isNaN(Number(value))) return 'R$ 0,00';
+    return Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 };
 
 const getComponentCost = (component: Component): number => {
@@ -92,8 +92,8 @@ export const PurchaseOrderEditModal: React.FC<PurchaseOrderEditModalProps> = ({ 
     if (!componentSearch) return inventory.components.slice(0, 200); // Limit initial list for performance
     const lowerSearch = componentSearch.toLowerCase();
     return inventory.components.filter(c => 
-        c.name.toLowerCase().includes(lowerSearch) || 
-        c.sku.toLowerCase().includes(lowerSearch)
+        (c.name || '').toLowerCase().includes(lowerSearch) || 
+        (c.sku || '').toLowerCase().includes(lowerSearch)
     );
   }, [componentSearch, inventory.components]);
 

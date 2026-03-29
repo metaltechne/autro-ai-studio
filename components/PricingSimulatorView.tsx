@@ -15,7 +15,10 @@ import * as api from '../hooks/api';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend, Filler);
 
-const formatCurrency = (value: number) => value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const formatCurrency = (value: number | undefined | null) => {
+    if (value === undefined || value === null || isNaN(Number(value))) return 'R$ 0,00';
+    return Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+};
 const formatNumber = (value: number) => value.toLocaleString('pt-BR', { maximumFractionDigits: 0 });
 const formatDecimal = (value: number) => value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -58,7 +61,10 @@ export const PricingSimulatorView: React.FC<PricingSimulatorViewProps> = ({ inve
     const calculateKitCost = useCallback((kit: Kit): number => {
         const componentSkuMap = new Map<string, Component>(components.map(c => [c.sku, c]));
         const preferredId = settings?.preferredFastenerFamiliaId || 'fam-fixadores';
-        const fastenerFamilia = familias.find(f => f.id === preferredId);
+        let fastenerFamilia = familias.find(f => f.id === preferredId);
+        if (!fastenerFamilia) {
+            fastenerFamilia = familias.find(f => (f.nome || '').toLowerCase().includes('fixador'));
+        }
         let totalCost = 0;
         
         kit.components.forEach((kc: KitComponent) => {
@@ -70,9 +76,20 @@ export const PricingSimulatorView: React.FC<PricingSimulatorViewProps> = ({ inve
         
         if (kit.requiredFasteners && fastenerFamilia) {
             kit.requiredFasteners.forEach(rf => {
-                const [bitolaStr, compStr] = rf.dimension.replace('mm','').split('x');
-                const result = evaluateProcess(fastenerFamilia, { bitola: Number(bitolaStr), comprimento: Number(compStr) }, components);
-                totalCost += (result.custoFabricacao + result.custoMateriaPrima) * rf.quantity;
+                // Limpeza robusta: remove espaços, 'mm', 'M' e converte para minúsculo para padronizar o 'x'
+                const cleanDim = rf.dimension.toLowerCase().replace(/mm/g, '').replace(/m/g, '').replace(/\s+/g, '');
+                const [bitolaStr, compStr] = cleanDim.split('x');
+                const bitola = Number(bitolaStr);
+                const comprimento = Number(compStr || 0);
+                
+                if (!isNaN(bitola)) {
+                    const isNut = rf.dimension.includes('x0') || rf.dimension.endsWith('x0');
+                    const fixSFamilia = manufacturing.familias.find(f => f.id === 'fam-MONTAGEM-FIX-S' || f.nome?.toLowerCase() === 'montagem fix-s');
+                    const porPFamilia = manufacturing.familias.find(f => f.id === 'fam-MONTAGEM-POR-P' || f.nome?.toLowerCase() === 'montagem por-p');
+                    const familiaToUse = isNut ? porPFamilia : fixSFamilia;
+                    const result = evaluateProcess(familiaToUse || fastenerFamilia, { bitola, comprimento }, components, {}, { allFamilias: manufacturing.familias });
+                    totalCost += (result.custoFabricacao + result.custoMateriaPrima) * rf.quantity;
+                }
             });
         }
         
@@ -259,8 +276,9 @@ export const PricingSimulatorView: React.FC<PricingSimulatorViewProps> = ({ inve
         setAiAnalysis('');
         try {
             /* Fix: Obtain API key directly from environment and follow GoogleGenAI initialization guidelines. */
-            if (!process.env.API_KEY) throw new Error("Chave de API do Gemini não configurada.");
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+            const apiKey = process.env.GEMINI_API_KEY;
+            if (!apiKey) throw new Error("Chave de API do Gemini não configurada.");
+            const ai = new GoogleGenAI({ apiKey });
             
             const systemInstruction = `Você é um consultor de negócios especialista em precificação. Analise os dados fornecidos e forneça uma recomendação clara e concisa em português do Brasil.
 

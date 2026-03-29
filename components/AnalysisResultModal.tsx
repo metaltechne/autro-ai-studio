@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Modal } from './ui/Modal';
 import { Button } from './ui/Button';
-import { ProductionScenario, SubstitutionOption, InventoryHook, ManufacturingHook, CuttingOrdersHook, ManufacturingOrdersHook, ProductionScenarioShortage, ProductionOrdersHook } from '../types';
+import { ProductionScenario, SubstitutionOption, InventoryHook, ManufacturingHook, CuttingOrdersHook, ManufacturingOrdersHook, ProductionScenarioShortage, ProductionOrdersHook, PurchaseOrdersHook } from '../types';
 import { OptimizationChoiceModal } from './OptimizationChoiceModal';
 
 interface AnalysisResultModalProps {
@@ -14,9 +14,13 @@ interface AnalysisResultModalProps {
     cuttingOrdersHook: CuttingOrdersHook;
     manufacturingOrdersHook: ManufacturingOrdersHook;
     productionOrdersHook: ProductionOrdersHook;
+    purchaseOrdersHook: PurchaseOrdersHook;
 }
 
-const formatCurrency = (value: number) => value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const formatCurrency = (value: number | undefined | null) => {
+    if (value === undefined || value === null || isNaN(Number(value))) return 'R$ 0,00';
+    return Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+};
 
 const SubstitutionSuggestion: React.FC<{ sub: SubstitutionOption }> = ({ sub }) => (
     <div className="text-xs text-blue-800 bg-blue-100 p-2 rounded-md mt-1 border border-blue-200">
@@ -37,7 +41,7 @@ const ScenarioCard: React.FC<{
     onSelect: (scenario: ProductionScenario) => void;
     isCreating: boolean;
 }> = ({ scenario, isRecommended, onSelect, isCreating }) => {
-    const hasOptimization = scenario.shortages.some(s => s.substitutionOptions && s.substitutionOptions.length > 0);
+    const hasShortages = scenario.shortages.length > 0;
     return (
         <div className={`p-4 border rounded-lg ${isRecommended ? 'border-autro-blue bg-autro-blue-light' : 'bg-white'}`}>
             <div className="flex justify-between items-start">
@@ -81,7 +85,7 @@ const ScenarioCard: React.FC<{
             
             <div className="mt-4 flex justify-end">
                 <Button onClick={() => onSelect(scenario)} disabled={isCreating}>
-                    {isCreating ? 'Criando Ordem...' : (hasOptimization ? 'Resolver Faltas e Criar Ordem' : 'Criar Ordem com este Cenário')}
+                    {isCreating ? 'Criando Ordem...' : (hasShortages ? 'Resolver Faltas e Criar Ordem' : 'Criar Ordem com este Cenário')}
                 </Button>
             </div>
         </div>
@@ -110,8 +114,8 @@ export const AnalysisResultModal: React.FC<AnalysisResultModalProps> = (props) =
     };
     
     const handleSelectScenario = (scenario: ProductionScenario) => {
-        const hasOptimization = scenario.shortages.some(s => s.substitutionOptions && s.substitutionOptions.length > 0);
-        if (hasOptimization) {
+        const hasShortages = scenario.shortages.length > 0;
+        if (hasShortages) {
             setOptimizationChoice(scenario);
         } else {
             handleCreateOrder(scenario);
@@ -158,6 +162,7 @@ export const AnalysisResultModal: React.FC<AnalysisResultModalProps> = (props) =
                     cuttingOrdersHook={props.cuttingOrdersHook}
                     manufacturingOrdersHook={props.manufacturingOrdersHook}
                     productionOrdersHook={props.productionOrdersHook}
+                    purchaseOrdersHook={props.purchaseOrdersHook}
                 />
             )}
         </>

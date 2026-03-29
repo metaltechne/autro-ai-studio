@@ -19,6 +19,15 @@ export const ManufacturingPlannerView: React.FC<ManufacturingPlannerViewProps> =
     const [order, setOrder] = useState<ManufacturingOrderItem[]>([]);
     const [analysisResult, setAnalysisResult] = useState<ManufacturingAnalysis | null>(null);
     const [showDictionary, setShowDictionary] = useState(false);
+    
+    // New fields for manufacturing order
+    const [orderType, setOrderType] = useState<'interna' | 'externa'>('interna');
+    const [priority, setPriority] = useState<'baixa' | 'normal' | 'alta' | 'urgente'>('normal');
+    const [startDate, setStartDate] = useState('');
+    const [expectedDeliveryDate, setExpectedDeliveryDate] = useState('');
+    const [batchNumber, setBatchNumber] = useState('');
+    const [supplierName, setSupplierName] = useState('');
+    const [notes, setNotes] = useState('');
 
     const manufacturableFamilias = useMemo(() => {
         return familias.filter(f => f.nodes?.some(n => n.data.type === 'productGenerator')).sort((a,b) => a.nome.localeCompare(b.nome));
@@ -33,7 +42,7 @@ export const ManufacturingPlannerView: React.FC<ManufacturingPlannerViewProps> =
         const codes = new Set<string>();
         // Busca direta
         fam.nodes.forEach(n => {
-            if ((n.data.type === 'headCodeTable' || n.data.type === 'codificationTable') && n.data.headCodes) {
+            if ((n.data.type === 'headCodeTable' || n.data.type === 'codificationTable' || n.data.type === 'codificationTableNode') && n.data.headCodes) {
                 n.data.headCodes.forEach(hc => codes.add(hc.code));
             }
         });
@@ -43,9 +52,9 @@ export const ManufacturingPlannerView: React.FC<ManufacturingPlannerViewProps> =
             fam.nodes.forEach(n => {
                 if (n.data.type === 'inventoryComponent' && n.data.componentIdTemplate) {
                     const template = n.data.componentIdTemplate;
-                    const source = familias.find(f => f.nodes?.some(gn => gn.data.type === 'productGenerator' && gn.data.generationConfig?.skuTemplate === template));
+                    const source = familias.find(f => f.nodes?.some(gn => (gn.data.type === 'productGenerator' || gn.data.type === 'productGeneratorNode') && gn.data.generationConfig?.skuTemplate === template));
                     source?.nodes.forEach(sn => {
-                        if ((sn.data.type === 'headCodeTable' || sn.data.type === 'codificationTable') && sn.data.headCodes) {
+                        if ((sn.data.type === 'headCodeTable' || sn.data.type === 'codificationTable' || sn.data.type === 'codificationTableNode') && sn.data.headCodes) {
                             sn.data.headCodes.forEach(hc => codes.add(hc.code));
                         }
                     });
@@ -68,7 +77,7 @@ export const ManufacturingPlannerView: React.FC<ManufacturingPlannerViewProps> =
     }, [components, selectedFamiliaId, selectedCodeFilter]);
 
     const handleAddAllFiltered = () => {
-        const newItems = filteredComponents.map(c => ({ componentId: c.id, quantity: 1 }));
+        const newItems = filteredComponents.map(c => ({ componentId: c.id, quantity: 1, name: c.name, sku: c.sku }));
         setOrder(prev => {
             const updated = [...prev];
             newItems.forEach(ni => {
@@ -83,7 +92,7 @@ export const ManufacturingPlannerView: React.FC<ManufacturingPlannerViewProps> =
         const dict = new Map<string, { code: string; type: string; description: string; femaleStock: number; maleStock: number; femaleSku: string; maleSku: string }>();
         familias.forEach(f => {
             f.nodes.forEach(n => {
-                if ((n.data.type === 'headCodeTable' || n.data.type === 'codificationTable') && n.data.headCodes) {
+                if ((n.data.type === 'headCodeTable' || n.data.type === 'codificationTable' || n.data.type === 'codificationTableNode') && n.data.headCodes) {
                     n.data.headCodes.forEach((hc: ProcessHeadCode) => {
                         const dictKey = `${hc.type || 'N/A'}-${hc.code}`;
                         if (!dict.has(dictKey)) {
@@ -159,7 +168,7 @@ export const ManufacturingPlannerView: React.FC<ManufacturingPlannerViewProps> =
                                         setOrder(prev => {
                                             const ex = prev.find(i => i.componentId === c.id);
                                             if (ex) return prev.map(i => i.componentId === c.id ? {...i, quantity: i.quantity + 1} : i);
-                                            return [...prev, { componentId: c.id, quantity: 1 }];
+                                            return [...prev, { componentId: c.id, quantity: 1, name: c.name, sku: c.sku }];
                                         });
                                         setAnalysisResult(null);
                                     }} className="p-3 border border-slate-100 rounded-2xl hover:border-indigo-300 hover:bg-indigo-50/30 cursor-pointer transition-all flex justify-between items-center group">
@@ -246,6 +255,41 @@ export const ManufacturingPlannerView: React.FC<ManufacturingPlannerViewProps> =
                                     <p className="text-3xl font-black text-slate-900">{formatCurrency(analysisResult.totalCost)}</p>
                                 </div>
                                 <div className="flex-grow overflow-y-auto space-y-2 mb-6 -mr-2 pr-2">
+                                    {analysisResult.detailedBreakdown && analysisResult.detailedBreakdown.length > 0 && (
+                                        <>
+                                            <h4 className="text-[9px] font-black text-slate-400 uppercase tracking-widest border-b pb-1 mb-2">Detalhamento por Item</h4>
+                                            {analysisResult.detailedBreakdown.map((step, idx) => (
+                                                <div key={idx} className="flex justify-between items-center text-[11px] p-2 bg-slate-50 border border-slate-100 rounded-lg">
+                                                    <div className="min-w-0 flex-grow">
+                                                        <p className="font-bold text-slate-700 truncate">{step.name}</p>
+                                                        <p className="text-[9px] text-slate-400 font-black uppercase">{step.details}</p>
+                                                    </div>
+                                                    <div className="text-right flex-shrink-0 ml-4">
+                                                        <p className="font-black text-slate-900">{formatCurrency(step.cost)}</p>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                            <div className="h-4"></div>
+                                        </>
+                                    )}
+                                    {analysisResult.manufacturingSteps && analysisResult.manufacturingSteps.length > 0 && (
+                                        <>
+                                            <h4 className="text-[9px] font-black text-slate-400 uppercase tracking-widest border-b pb-1 mb-2 mt-4">Etapas de Fabricação</h4>
+                                            {analysisResult.manufacturingSteps.map((step, idx) => (
+                                                <div key={idx} className="flex justify-between items-center text-[11px] p-2 bg-indigo-50 border border-indigo-100 rounded-lg">
+                                                    <div className="min-w-0 flex-grow">
+                                                        <p className="font-bold text-indigo-900 truncate">{step.name}</p>
+                                                        <p className="text-[9px] text-indigo-500 font-black uppercase">{step.details}</p>
+                                                    </div>
+                                                    <div className="text-right flex-shrink-0 ml-4">
+                                                        <p className="font-black text-indigo-900">{formatCurrency(step.cost)}</p>
+                                                        {step.timeSeconds ? <p className="text-[9px] text-indigo-500 font-bold">{Math.round(step.timeSeconds / 60)} min</p> : null}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                            <div className="h-4"></div>
+                                        </>
+                                    )}
                                     <h4 className="text-[9px] font-black text-slate-400 uppercase tracking-widest border-b pb-1 mb-2">Materiais a Consumir</h4>
                                     {analysisResult.requirements.map(req => {
                                         const comp = inventory.findComponentById(req.id);
@@ -264,10 +308,76 @@ export const ManufacturingPlannerView: React.FC<ManufacturingPlannerViewProps> =
                                         );
                                     })}
                                 </div>
+                                
+                                <div className="mt-4 p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+                                    <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Detalhes da Ordem</h4>
+                                    
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="block text-[9px] font-bold text-slate-500 uppercase mb-1">Tipo de Fabricação</label>
+                                            <Select value={orderType} onChange={e => setOrderType(e.target.value as any)} className="w-full h-8 text-xs">
+                                                <option value="interna">Interna</option>
+                                                <option value="externa">Externa (Terceirizada)</option>
+                                            </Select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-[9px] font-bold text-slate-500 uppercase mb-1">Prioridade</label>
+                                            <Select value={priority} onChange={e => setPriority(e.target.value as any)} className="w-full h-8 text-xs">
+                                                <option value="baixa">Baixa</option>
+                                                <option value="normal">Normal</option>
+                                                <option value="alta">Alta</option>
+                                                <option value="urgente">Urgente</option>
+                                            </Select>
+                                        </div>
+                                    </div>
+                                    <div className="mt-3">
+                                        <label className="block text-[9px] font-bold text-slate-500 uppercase mb-1">Lote / OP</label>
+                                        <Input value={batchNumber} onChange={e => setBatchNumber(e.target.value)} placeholder="Ex: LOTE-001" className="w-full h-8 text-xs" />
+                                    </div>
+
+                                    {orderType === 'externa' && (
+                                        <div>
+                                            <label className="block text-[9px] font-bold text-slate-500 uppercase mb-1">Fornecedor / Terceiro</label>
+                                            <Input value={supplierName} onChange={e => setSupplierName(e.target.value)} placeholder="Nome do fornecedor" className="w-full h-8 text-xs" />
+                                        </div>
+                                    )}
+
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="block text-[9px] font-bold text-slate-500 uppercase mb-1">Data de Início</label>
+                                            <Input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-full h-8 text-xs" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[9px] font-bold text-slate-500 uppercase mb-1">Previsão de Entrega</label>
+                                            <Input type="date" value={expectedDeliveryDate} onChange={e => setExpectedDeliveryDate(e.target.value)} className="w-full h-8 text-xs" />
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-[9px] font-bold text-slate-500 uppercase mb-1">Observações</label>
+                                        <Input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Instruções adicionais..." className="w-full h-8 text-xs" />
+                                    </div>
+                                </div>
+
                                 <Button onClick={async () => {
-                                    const id = await addManufacturingOrder(order, analysisResult);
-                                    if(id) { addToast(`Ordem ${id} Gerada com Sucesso`, 'success'); setOrder([]); setAnalysisResult(null); }
-                                }} className="h-16 bg-indigo-600 hover:bg-indigo-500 border-none shadow-xl text-lg font-black uppercase italic rounded-2xl">Gerar Ordem de Fabricação</Button>
+                                    const id = await addManufacturingOrder(order, analysisResult, {
+                                        type: orderType,
+                                        priority,
+                                        startDate,
+                                        expectedDeliveryDate,
+                                        batchNumber,
+                                        supplierName: orderType === 'externa' ? supplierName : undefined,
+                                        notes
+                                    });
+                                    if(id) { 
+                                        addToast(`Ordem ${id} Gerada com Sucesso`, 'success'); 
+                                        setOrder([]); 
+                                        setAnalysisResult(null); 
+                                        setBatchNumber('');
+                                        setSupplierName('');
+                                        setNotes('');
+                                    }
+                                }} className="h-16 w-full bg-indigo-600 hover:bg-indigo-500 border-none shadow-xl text-lg font-black uppercase italic rounded-2xl mt-4 shrink-0">Gerar Ordem de Fabricação</Button>
                             </div>
                         )}
                     </div>
@@ -326,7 +436,10 @@ export const ManufacturingPlannerView: React.FC<ManufacturingPlannerViewProps> =
     );
 };
 
-const formatCurrency = (val: number) => val.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const formatCurrency = (value: number | undefined | null) => {
+    if (value === undefined || value === null || isNaN(Number(value))) return 'R$ 0,00';
+    return Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+};
 
 interface ManufacturingPlannerViewProps {
     manufacturing: ManufacturingHook;

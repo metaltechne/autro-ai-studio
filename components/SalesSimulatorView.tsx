@@ -15,11 +15,11 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { getLogoBase64ForPdf } from '../data/assets';
 import { usePermissions } from '../hooks/usePermissions';
-import { nanoid } from 'https://esm.sh/nanoid@5.0.7';
+import { nanoid } from 'nanoid';
 
-const formatCurrency = (value: number) => {
-    if (typeof value !== 'number' || isNaN(value)) return 'R$ 0,00';
-    return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const formatCurrency = (value: number | undefined | null) => {
+    if (value === undefined || value === null || isNaN(Number(value))) return 'R$ 0,00';
+    return Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 };
 
 interface SalesSimulatorViewProps {
@@ -122,7 +122,10 @@ export const SalesSimulatorView: React.FC<SalesSimulatorViewProps> = ({ inventor
 
         const componentSkuMap = new Map<string, Component>(components.map(c => [c.sku, c]));
         const preferredId = financialSettings?.preferredFastenerFamiliaId || 'fam-fixadores';
-        const fastenerFamilia = familias.find(f => f.id === preferredId);
+        let fastenerFamilia = familias.find(f => f.id === preferredId);
+        if (!fastenerFamilia) {
+            fastenerFamilia = familias.find(f => (f.nome || '').toLowerCase().includes('fixador'));
+        }
 
         let totalCost = 0;
         const structure = [
@@ -134,12 +137,17 @@ export const SalesSimulatorView: React.FC<SalesSimulatorViewProps> = ({ inventor
             ...kit.requiredFasteners.map((rf: { dimension: string; quantity: number }) => {
                 let unitCost = 0;
                 if(fastenerFamilia) {
-                     const dimParts = rf.dimension.replace('mm', '').split('x');
+                     const cleanDim = rf.dimension.toLowerCase().replace(/mm/g, '').replace(/m/g, '').replace(/\s+/g, '');
+                     const dimParts = cleanDim.split('x');
                      const bitola = Number(dimParts[0]);
                      const comprimento = dimParts.length > 1 ? Number(dimParts[1]) : 0;
                      
                      if (!isNaN(bitola)) {
-                        const result = evaluateProcess(fastenerFamilia, { bitola, comprimento }, components);
+                        const isNut = rf.dimension.includes('x0') || rf.dimension.endsWith('x0');
+                        const fixSFamilia = familias.find(f => f.id === 'fam-MONTAGEM-FIX-S' || f.nome?.toLowerCase() === 'montagem fix-s');
+                        const porPFamilia = familias.find(f => f.id === 'fam-MONTAGEM-POR-P' || f.nome?.toLowerCase() === 'montagem por-p');
+                        const familiaToUse = isNut ? porPFamilia : fixSFamilia;
+                        const result = evaluateProcess(familiaToUse || fastenerFamilia, { bitola, comprimento }, components, {}, { allFamilias: familias });
                         unitCost = result.custoFabricacao + result.custoMateriaPrima;
                      }
                 }
@@ -292,7 +300,10 @@ export const SalesSimulatorView: React.FC<SalesSimulatorViewProps> = ({ inventor
     const totalCostValue = useMemo(() => {
         const componentSkuMap = new Map<string, Component>(components.map(c => [c.sku, c]));
         const preferredId = financialSettings?.preferredFastenerFamiliaId || 'fam-fixadores';
-        const fastenerFamilia = familias.find(f => f.id === preferredId);
+        let fastenerFamilia = familias.find(f => f.id === preferredId);
+        if (!fastenerFamilia) {
+            fastenerFamilia = familias.find(f => (f.nome || '').toLowerCase().includes('fixador'));
+        }
         let total = 0;
         for (const orderItem of orderItems) {
             const kit = findKitById(orderItem.kitId);
@@ -306,11 +317,16 @@ export const SalesSimulatorView: React.FC<SalesSimulatorViewProps> = ({ inventor
                 kit.requiredFasteners.forEach((rf: { dimension: string; quantity: number }) => {
                     let unitCost = 0;
                     if(fastenerFamilia) {
-                         const dimParts = rf.dimension.replace('mm', '').split('x');
+                         const cleanDim = rf.dimension.toLowerCase().replace(/mm/g, '').replace(/m/g, '').replace(/\s+/g, '');
+                         const dimParts = cleanDim.split('x');
                          const bitola = Number(dimParts[0]);
                          const comprimento = dimParts.length > 1 ? Number(dimParts[1]) : 0;
                          if(!isNaN(bitola)) {
-                            const result = evaluateProcess(fastenerFamilia, { bitola, comprimento }, components);
+                            const isNut = rf.dimension.includes('x0') || rf.dimension.endsWith('x0');
+                            const fixSFamilia = familias.find(f => f.id === 'fam-MONTAGEM-FIX-S' || f.nome?.toLowerCase() === 'montagem fix-s');
+                            const porPFamilia = familias.find(f => f.id === 'fam-MONTAGEM-POR-P' || f.nome?.toLowerCase() === 'montagem por-p');
+                            const familiaToUse = isNut ? porPFamilia : fixSFamilia;
+                            const result = evaluateProcess(familiaToUse || fastenerFamilia, { bitola, comprimento }, components, {}, { allFamilias: familias });
                             unitCost = result.custoFabricacao + result.custoMateriaPrima;
                          }
                     }
@@ -338,6 +354,10 @@ export const SalesSimulatorView: React.FC<SalesSimulatorViewProps> = ({ inventor
     }, [totalCostValue, simulationParams, financialSettings, calculateSaleDetails]);
 
     const handleCheckViability = () => {
+        if (!financialSettings) {
+            addToast('Configurações financeiras não carregadas.', 'error');
+            return;
+        }
         if (orderItems.length === 0 && extraItems.size === 0) return;
         const orderItemsWithHeadCodes = orderItems.map(item => ({ ...item, fastenerHeadCode: orderItemHeadCodes.get(item.kitId) }));
         const addItems: { componentId: string, quantity: number }[] = [];
@@ -347,7 +367,7 @@ export const SalesSimulatorView: React.FC<SalesSimulatorViewProps> = ({ inventor
             addItems.push({ componentId: i.component.id, quantity: i.quantity });
         });
 
-        const result = inventory.analyzeProductionRun(orderItemsWithHeadCodes, addItems, manufacturing.familias, inventory.components, financialSettings!);
+        const result = inventory.analyzeProductionRun(orderItemsWithHeadCodes, addItems, manufacturing.familias, inventory.components, financialSettings);
         setAnalysisModalData(result);
     };
 
@@ -363,8 +383,8 @@ export const SalesSimulatorView: React.FC<SalesSimulatorViewProps> = ({ inventor
                     <div className="flex items-start gap-4 mb-4 bg-slate-50 p-3 rounded-xl">
                         <InlineQRCode data={{ type: 'kit', id: inspectedKitDetails.kit.id }} size={60} />
                         <div className="flex-grow min-w-0">
-                            <h4 className="font-bold text-black truncate">{inspectedKitDetails.kit.name}</h4>
-                            <p className="text-[10px] text-gray-500 font-black uppercase tracking-widest">{inspectedKitDetails.kit.marca} / {inspectedKitDetails.kit.modelo}</p>
+                            <h4 className="font-bold text-black leading-tight">{inspectedKitDetails.kit.name}</h4>
+                            <p className="text-[10px] text-gray-500 font-black uppercase tracking-widest mt-1">{(inspectedKitDetails.kit.marca || 'Sem Marca')} / {(inspectedKitDetails.kit.modelo || 'N/A')}</p>
                         </div>
                     </div>
                     
@@ -377,7 +397,7 @@ export const SalesSimulatorView: React.FC<SalesSimulatorViewProps> = ({ inventor
                                     <div key={index} className={`flex items-center justify-between text-xs p-2 rounded-lg ${isNut ? 'bg-amber-50/50' : (item.type === 'Fixador' ? 'bg-indigo-50/50' : 'bg-white border shadow-sm')}`}>
                                         <div className="flex items-center gap-2 flex-grow min-w-0">
                                              <span className={`w-2 h-2 rounded-full flex-shrink-0 ${item.stock >= item.quantity ? 'bg-green-500' : 'bg-red-500'}`}></span>
-                                             <div className="flex-grow truncate">
+                                             <div className="flex-grow">
                                                  <span className="font-bold">{item.quantity}x</span> <span className={isNut ? 'text-amber-800 font-semibold' : (item.type === 'Fixador' ? 'text-indigo-800 font-semibold' : '')}>{item.name}</span>
                                              </div>
                                         </div>
@@ -391,7 +411,7 @@ export const SalesSimulatorView: React.FC<SalesSimulatorViewProps> = ({ inventor
                             <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 border-b pb-1">Adicionar Chave / Extra</h5>
                             {inspectedKitDetails.keyComponents.map((key) => (
                                  <div key={key.id} className="flex items-center justify-between text-xs p-2 rounded-lg bg-emerald-50/30 border border-emerald-100/50">
-                                    <div className="flex items-center gap-2 truncate">
+                                    <div className="flex items-center gap-2">
                                          <span className={`w-2 h-2 rounded-full ${key.stock > 0 ? 'bg-green-500' : 'bg-red-500'}`}></span>
                                          <span className="font-medium text-slate-700">{key.name}</span>
                                     </div>
@@ -422,11 +442,11 @@ export const SalesSimulatorView: React.FC<SalesSimulatorViewProps> = ({ inventor
                                 <div className="flex-grow overflow-y-auto -mr-3 pr-3 space-y-2">
                                     {availableKitsForSelection.map(kit => (
                                         <div key={kit.id} onClick={() => setInspectedKitId(kit.id)} className={`p-2.5 border rounded-xl cursor-pointer flex items-center justify-between transition-all ${inspectedKitId === kit.id ? 'bg-autro-blue text-white shadow-lg ring-2 ring-autro-blue ring-offset-2' : 'bg-white hover:bg-slate-50'}`}>
-                                            <div className="min-w-0 flex-grow">
-                                                <p className={`font-bold text-sm truncate ${inspectedKitId === kit.id ? 'text-white' : 'text-black'}`}>{kit.name}</p>
-                                                <p className={`text-[10px] uppercase font-black tracking-tighter ${inspectedKitId === kit.id ? 'text-white/70' : 'text-slate-400'}`}>{kit.modelo} ({kit.ano})</p>
+                                            <div className="min-w-0 flex-grow pr-2">
+                                                <p className={`font-bold text-sm leading-tight ${inspectedKitId === kit.id ? 'text-white' : 'text-black'}`}>{kit.name}</p>
+                                                <p className={`text-[10px] uppercase font-black tracking-tighter mt-1 ${inspectedKitId === kit.id ? 'text-white/70' : 'text-slate-400'}`}>{kit.modelo} ({kit.ano})</p>
                                             </div>
-                                            <button className={`p-1.5 rounded-lg transition-colors ${inspectedKitId === kit.id ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600 hover:bg-autro-blue hover:text-white'}`} onClick={(e) => {e.stopPropagation(); handleAddItem(kit.id)}}>+</button>
+                                            <button className={`p-1.5 rounded-lg transition-colors flex-shrink-0 ${inspectedKitId === kit.id ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600 hover:bg-autro-blue hover:text-white'}`} onClick={(e) => {e.stopPropagation(); handleAddItem(kit.id)}}>+</button>
                                         </div>
                                     ))}
                                 </div>
@@ -446,7 +466,7 @@ export const SalesSimulatorView: React.FC<SalesSimulatorViewProps> = ({ inventor
                                 {orderItems.map(item => {
                                     const kit = findKitById(item.kitId); if (!kit) return null;
                                     return (<div key={item.kitId} className="p-3 bg-slate-50 rounded-xl border border-slate-200">
-                                        <div className="flex justify-between items-start mb-2"><p className="text-sm font-bold text-black leading-tight truncate mr-2">{kit.name}</p><button className="text-red-400 hover:text-red-600" onClick={() => handleRemoveItem(item.kitId)}>&times;</button></div>
+                                        <div className="flex justify-between items-start mb-2"><p className="text-sm font-bold text-black leading-tight mr-2">{kit.name}</p><button className="text-red-400 hover:text-red-600 flex-shrink-0" onClick={() => handleRemoveItem(item.kitId)}>&times;</button></div>
                                         <div className="flex items-center justify-between gap-4">
                                             <div className="flex items-center gap-2"><span className="text-[10px] font-black uppercase text-gray-400">Qtd</span><Input type="number" value={item.quantity} onChange={e => handleQuantityChange(item.kitId, parseInt(e.target.value))} className="w-16 h-8 text-center text-sm" min="0"/></div>
                                             {kit.requiredFasteners.length > 0 && <Select value={orderItemHeadCodes.get(kit.id) || ''} onChange={(e) => setOrderItemHeadCodes(p => new Map(p).set(kit.id, e.target.value))} className="h-8 !py-0 text-[10px]">{allHeadCodes.map(code => <option key={code} value={code}>{code}</option>)}</Select>}
@@ -458,7 +478,7 @@ export const SalesSimulatorView: React.FC<SalesSimulatorViewProps> = ({ inventor
                                     return (
                                         <div key={item.component.id} className="p-3 bg-emerald-50/30 rounded-xl border border-emerald-100 flex justify-between items-center">
                                             <div className="min-w-0">
-                                                <p className="text-sm font-bold text-emerald-800 truncate">{item.component.name}</p>
+                                                <p className="text-sm font-bold text-emerald-800 leading-tight">{item.component.name}</p>
                                                 <div className="flex items-center gap-2 mt-1"><span className="text-[10px] font-black uppercase text-emerald-600">Extra Qtd:</span><Input type="number" value={item.quantity} onChange={e => handleUpdateExtraItemQuantity(item.component.id, parseInt(e.target.value))} className="w-16 h-7 text-center text-xs" min="0"/></div>
                                             </div>
                                             <button className="text-red-400" onClick={() => handleUpdateExtraItemQuantity(item.component.id, 0)}>&times;</button>

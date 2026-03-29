@@ -3,7 +3,7 @@ import { Customer, CustomersHook } from '../types';
 import * as api from './api';
 import { useToast } from './useToast';
 import { useActivityLog } from '../contexts/ActivityLogContext';
-import { nanoid } from 'https://esm.sh/nanoid@5.0.7';
+import { nanoid } from 'nanoid';
 
 export const useCustomers = (): CustomersHook => {
     const [customers, setCustomers] = useState<Customer[]>([]);
@@ -74,6 +74,21 @@ export const useCustomers = (): CustomersHook => {
         }
     }, [addToast, addActivityLog, loadData]);
 
+    const updateMultipleCustomers = useCallback(async (customersToUpdate: Customer[]) => {
+        try {
+            const currentCustomers = await api.getCustomers();
+            const updateMap = new Map(customersToUpdate.map(c => [c.id, c]));
+            const newCustomers = currentCustomers.map(c => updateMap.get(c.id) || c);
+            await api.saveCustomers(newCustomers);
+            await addActivityLog(`Atualizou ${customersToUpdate.length} clientes via planilha.`);
+            await loadData();
+        } catch (e) {
+            console.error("Failed to batch update customers:", e);
+            addToast('Erro ao atualizar clientes em lote.', 'error');
+            throw e;
+        }
+    }, [addToast, addActivityLog, loadData]);
+
     const deleteCustomer = useCallback(async (customerId: string) => {
         try {
             const currentCustomers = await api.getCustomers();
@@ -96,6 +111,7 @@ export const useCustomers = (): CustomersHook => {
         isLoading,
         addCustomer,
         updateCustomer,
+        updateMultipleCustomers,
         deleteCustomer,
         findCustomerById,
     };

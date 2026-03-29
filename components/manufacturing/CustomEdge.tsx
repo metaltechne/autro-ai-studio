@@ -3,19 +3,20 @@ import React from 'react';
 import { getBezierPath, BaseEdge, EdgeLabelRenderer, useReactFlow } from 'reactflow';
 import type { EdgeProps } from 'reactflow';
 
-export default function CustomEdge({
-  id,
-  sourceX,
-  sourceY,
-  targetX,
-  targetY,
-  sourcePosition,
-  targetPosition,
-  style = {},
-  markerEnd,
-  selected,
-  type,
-}: EdgeProps) {
+export default function CustomEdge(props: EdgeProps) {
+  const {
+    id,
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+    sourcePosition,
+    targetPosition,
+    style = {},
+    markerEnd,
+    selected,
+  } = props;
+  const type = (props as any).type;
   const { setEdges } = useReactFlow();
   const [edgePath, labelX, labelY] = getBezierPath({
     sourceX,

@@ -3,11 +3,11 @@ import { Modal } from './Modal';
 import { Button } from './Button';
 import { Input } from './Input';
 import { ManufacturingOrder, PurchaseOrder, ProductionOrder, Installment } from '../../types';
-import { nanoid } from 'https://esm.sh/nanoid@5.0.7';
+import { nanoid } from 'nanoid';
 
-const formatCurrency = (value: number | undefined) => {
-    if (typeof value !== 'number') return 'R$ --';
-    return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const formatCurrency = (value: number | undefined | null) => {
+    if (value === undefined || value === null || isNaN(Number(value))) return 'R$ 0,00';
+    return Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 const formatDate = (isoString: string | undefined) => {
     if (!isoString) return '--';
@@ -20,9 +20,11 @@ export const FinancialManagementModal: React.FC<{
     order: OrderWithFinancials | null;
     onClose: () => void;
     onSave: (orderId: string, installments: Installment[]) => Promise<void>;
-}> = ({ order, onClose, onSave }) => {
+    onReanalyze?: (orderId: string) => Promise<void>;
+}> = ({ order, onClose, onSave, onReanalyze }) => {
     const [installments, setInstallments] = useState<Installment[]>([]);
     const [isSaving, setIsSaving] = useState(false);
+    const [isReanalyzing, setIsReanalyzing] = useState(false);
     const [newInstallment, setNewInstallment] = useState({ number: '', value: '', dueDate: '', supplierName: '', notes: '' });
     const [termInput, setTermInput] = useState('');
 
@@ -39,6 +41,16 @@ export const FinancialManagementModal: React.FC<{
     }, [order]);
     
     if (!order) return null;
+
+    const handleReanalyze = async () => {
+        if (!onReanalyze) return;
+        setIsReanalyzing(true);
+        try {
+            await onReanalyze(order.id);
+        } finally {
+            setIsReanalyzing(false);
+        }
+    };
 
     const handleAddInstallment = () => {
         if (!newInstallment.value || !newInstallment.dueDate) {
@@ -133,14 +145,32 @@ export const FinancialManagementModal: React.FC<{
     return (
         <Modal isOpen={!!order} onClose={onClose} title={`Gestão Financeira: ${order.id}`} size="4xl">
             <div className="space-y-6 max-h-[70vh] overflow-y-auto pr-2">
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="p-4 bg-gray-50 rounded-lg">
                         <h4 className="text-md font-semibold text-black">Valor Total da Ordem</h4>
-                        <p className="text-2xl font-bold text-autro-blue">{formatCurrency(order.totalValue)}</p>
+                        <div className="flex items-center gap-2">
+                            <p className="text-2xl font-bold text-autro-blue">{formatCurrency(order.totalValue)}</p>
+                            {onReanalyze && (
+                                <button 
+                                    onClick={handleReanalyze} 
+                                    disabled={isReanalyzing}
+                                    className="p-1 text-slate-400 hover:text-autro-blue transition-colors"
+                                    title="Recalcular custo com base nos processos atuais"
+                                >
+                                    <svg className={`w-4 h-4 ${isReanalyzing ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                    </svg>
+                                </button>
+                            )}
+                        </div>
                     </div>
                      <div className="p-4 bg-gray-50 rounded-lg">
                         <h4 className="text-md font-semibold text-black">Valor Total das Parcelas</h4>
                         <p className={`text-2xl font-bold ${Math.abs(order.totalValue - totalValue) > 0.01 ? 'text-red-600' : 'text-green-600'}`}>{formatCurrency(totalValue)}</p>
+                    </div>
+                    <div className="p-4 bg-gray-50 rounded-lg">
+                        <h4 className="text-md font-semibold text-black">Diferença</h4>
+                        <p className={`text-2xl font-bold ${Math.abs(order.totalValue - totalValue) > 0.01 ? 'text-amber-600' : 'text-slate-400'}`}>{formatCurrency(order.totalValue - totalValue)}</p>
                     </div>
                 </div>
                 

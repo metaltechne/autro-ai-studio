@@ -15,7 +15,10 @@ import { PickingListModal } from './ui/PickingListModal';
 import { getLogoBase64ForPdf, AUTRO_LOGO_URL } from '../data/assets';
 import * as api from '../hooks/api';
 
-const formatCurrency = (value: number) => value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const formatCurrency = (value: number | undefined | null) => {
+    if (value === undefined || value === null || isNaN(Number(value))) return 'R$ 0,00';
+    return Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+};
 
 const formatDateTime = (isoString: string) => {
     return new Date(isoString).toLocaleString('pt-BR', {

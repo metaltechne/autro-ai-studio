@@ -10,11 +10,11 @@ import ReactFlow, {
     Panel
 } from 'reactflow';
 import type { Node, Edge } from 'reactflow';
-import dagre from 'https://esm.sh/dagre@0.8.5';
+import dagre from 'dagre';
 import { ManufacturingHook, InventoryHook, ProcessNodeData, FamiliaComponente, ProcessCategory, View, ScannedQRCodeData } from '../types';
 import { Button } from './ui/Button';
 // Fix: Removed non-existent HeadCodeTableNode and DimensionTableNode imports.
-import { FabricationNode, MaterialNode, FinalNode, InventoryNode, VariableNode, ProductGeneratorNode, ExternalDataSourceNode, DNATableNode, MaterialMappingNode, CodificationTableNode, ServiceMappingNode, SubProcessMappingNode } from './manufacturing/CustomNodes';
+import { FabricationNode, MaterialNode, FinalNode, InventoryNode, VariableNode, ProductGeneratorNode, ExternalDataSourceNode, DNATableNode, MaterialMappingNode, CodificationTableNode, ServiceMappingNode, SubProcessMappingNode, UsinagemParafusoSextavadoNode } from './manufacturing/CustomNodes';
 import CustomEdge from './manufacturing/CustomEdge';
 import { evaluateProcess } from '../hooks/manufacturing-evaluator';
 import { ConfirmationModal } from './ui/ConfirmationModal';
@@ -37,6 +37,7 @@ interface ManufacturingViewProps {
 
 // FIX: Node type mappings were updated to ensure all keys are correctly mapped to their respective node components.
 const nodeTypes = {
+    // Legacy mapping
     fabricationNode: FabricationNode,
     materialNode: MaterialNode,
     inventoryNode: InventoryNode,
@@ -46,7 +47,6 @@ const nodeTypes = {
     dnaTableNode: DNATableNode,
     materialMappingNode: MaterialMappingNode,
     productGeneratorNode: ProductGeneratorNode,
-    // Fix: Updated dimensionTableNode and headCodeTableNode to use existing components instead of missing ones.
     dimensionTableNode: DNATableNode,
     headCodeTableNode: CodificationTableNode,
     codificationTableNode: CodificationTableNode,
@@ -55,6 +55,21 @@ const nodeTypes = {
     finalNode: FinalNode,
     variableNode: VariableNode,
     externalDataSourceNode: ExternalDataSourceNode,
+    
+    // New/consistent mapping
+    dnaTable: DNATableNode,
+    codificationTable: CodificationTableNode,
+    materialMapping: MaterialMappingNode,
+    etapaFabricacao: FabricationNode,
+    materiaPrima: MaterialNode,
+    inventoryComponent: InventoryNode,
+    productGenerator: ProductGeneratorNode,
+    usinagemParafusoSextavado: UsinagemParafusoSextavadoNode,
+    serviceMapping: ServiceMappingNode,
+    subProcessMapping: SubProcessMappingNode,
+    final: FinalNode,
+    variable: VariableNode,
+    externalDataSource: ExternalDataSourceNode,
 };
 
 const edgeTypes = {
@@ -66,24 +81,31 @@ const edgeTypes = {
 const getLayoutedElements = (nodes: Node[], edges: Edge[], direction = 'LR') => {
     const dagreGraph = new dagre.graphlib.Graph();
     dagreGraph.setDefaultEdgeLabel(() => ({}));
-    const nodeWidth = 320; 
-    const nodeHeight = 250; 
-    dagreGraph.setGraph({ rankdir: direction });
+    
+    dagreGraph.setGraph({ rankdir: direction, ranksep: 200, nodesep: 150 });
+    
     nodes.forEach((node) => {
-        dagreGraph.setNode(node.id, { width: nodeWidth, height: nodeHeight });
+        const width = node.width || 320;
+        const height = node.height || 250;
+        dagreGraph.setNode(node.id, { width, height });
     });
+    
     edges.forEach((edge) => {
         dagreGraph.setEdge(edge.source, edge.target);
     });
+    
     dagre.layout(dagreGraph);
+    
     return {
         nodes: nodes.map((node) => {
             const nodeWithPosition = dagreGraph.node(node.id);
+            const width = node.width || 320;
+            const height = node.height || 250;
             return {
                 ...node,
                 position: {
-                    x: nodeWithPosition.x - nodeWidth / 2,
-                    y: nodeWithPosition.y - nodeHeight / 2,
+                    x: nodeWithPosition.x - width / 2,
+                    y: nodeWithPosition.y - height / 2,
                 },
             };
         }),
@@ -100,15 +122,25 @@ const ManufacturingCanvas: React.FC<{
     onViewGeneratedProducts: () => void;
 }> = ({ manufacturing, inventory, totalCost, nodes, edges, onViewGeneratedProducts }) => {
     const reactFlowWrapper = useRef<HTMLDivElement>(null);
-    const { project, setNodes, setEdges, fitView, getViewport } = useReactFlow();
+    const { project, setNodes, setEdges, fitView, getViewport, getNodes } = useReactFlow();
     const activeFamilia = manufacturing.getActiveFamilia();
 
     const onLayout = useCallback(() => {
-        const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(nodes, edges);
-        setNodes([...layoutedNodes]);
-        setEdges([...layoutedEdges]);
+        if (!activeFamilia) return;
+        const currentNodes = getNodes();
+        const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(currentNodes, edges);
+        
+        const changes = layoutedNodes.map(node => ({
+            id: node.id,
+            type: 'position' as const,
+            position: node.position,
+            positionAbsolute: node.position,
+            dragging: false
+        }));
+        
+        manufacturing.onNodesChange(activeFamilia.id)(changes);
         window.requestAnimationFrame(() => fitView());
-    }, [nodes, edges, setNodes, setEdges, fitView]);
+    }, [getNodes, edges, fitView, activeFamilia, manufacturing]);
 
     const nodesWithHooks = useMemo(() => {
         if (!activeFamilia) return [];
@@ -201,8 +233,7 @@ const ManufacturingCanvas: React.FC<{
                 nodeTypes={nodeTypes}
                 edgeTypes={edgeTypes}
                 fitView
-                panOnScroll
-                panOnScrollMode={PanOnScrollMode.Free}
+                zoomOnScroll={true}
             >
                 <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="#CBD5E1" />
                 <Controls />

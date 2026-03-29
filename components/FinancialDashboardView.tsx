@@ -15,7 +15,10 @@ interface FinancialDashboardViewProps {
     manufacturing: ManufacturingHook;
 }
 
-const formatCurrency = (value: number) => value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const formatCurrency = (value: number | undefined | null) => {
+    if (value === undefined || value === null || isNaN(Number(value))) return 'R$ 0,00';
+    return Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+};
 
 const StatCard: React.FC<{ title: string; value: string; description: string; }> = ({ title, value, description }) => (
     <Card>
@@ -56,22 +59,31 @@ export const FinancialDashboardView: React.FC<FinancialDashboardViewProps> = ({ 
     }, [purchaseOrdersHook.purchaseOrders, manufacturingOrdersHook.manufacturingOrders, inventory.components]);
 
     const kitMargins = useMemo(() => {
-         const componentSkuMap = new Map<string, Component>(inventory.components.map(c => [c.sku, c]));
+         const componentSkuMap = new Map<string, Component>(inventory.components.map(c => [c.sku.toUpperCase(), c]));
          const fastenerFamilia = manufacturing.familias.find(f => f.id === 'fam-fixadores');
 
         return inventory.kits.map(kit => {
             let totalCost = 0;
             kit.components.forEach(kc => {
-                const component: Component | undefined = componentSkuMap.get(kc.componentSku);
+                const component: Component | undefined = componentSkuMap.get(kc.componentSku.toUpperCase());
                 if (component) {
                     totalCost += (getComponentCost(component)) * kc.quantity;
                 }
             });
              if (kit.requiredFasteners && fastenerFamilia) {
                 kit.requiredFasteners.forEach(rf => {
-                    const [bitolaStr, compStr] = rf.dimension.replace('mm','').split('x');
-                    const result = evaluateProcess(fastenerFamilia, { bitola: Number(bitolaStr), comprimento: Number(compStr) }, inventory.components);
-                    totalCost += (result.custoFabricacao + result.custoMateriaPrima) * rf.quantity;
+                    const simpleDim = rf.dimension.replace(/mm/i, '').replace(/M/i, '');
+                    const [bitolaStr, compStr] = simpleDim.split('x');
+                    const bitola = parseInt(bitolaStr, 10);
+                    const comprimento = parseInt(compStr, 10);
+                    if (!isNaN(bitola) && !isNaN(comprimento)) {
+                        const isNut = rf.dimension.includes('x0') || rf.dimension.endsWith('x0');
+                        const fixSFamilia = manufacturing.familias.find(f => f.id === 'fam-MONTAGEM-FIX-S' || f.nome?.toLowerCase() === 'montagem fix-s');
+                        const porPFamilia = manufacturing.familias.find(f => f.id === 'fam-MONTAGEM-POR-P' || f.nome?.toLowerCase() === 'montagem por-p');
+                        const familiaToUse = isNut ? porPFamilia : fixSFamilia;
+                        const result = evaluateProcess(familiaToUse || fastenerFamilia, { bitola, comprimento }, inventory.components, {}, { allFamilias: manufacturing.familias });
+                        totalCost += (result.custoFabricacao + result.custoMateriaPrima) * rf.quantity;
+                    }
                 });
             }
 

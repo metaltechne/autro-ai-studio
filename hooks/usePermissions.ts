@@ -7,8 +7,8 @@ import { useAuth } from '../contexts/AuthContext';
 export const usePermissions = () => {
   const { role } = useAuth();
 
-  const canViewCosts = role === 'Admin' || role === 'Gerente';
-  const canViewSalesPrice = role === 'Admin' || role === 'Gerente' || role === 'Vendedor';
+  const canViewCosts = role === 'Admin' || role === 'Gestor' || role === 'Compras' || role === 'Financeiro';
+  const canViewSalesPrice = role === 'Admin' || role === 'Gestor' || role === 'Vendedor' || role === 'Financeiro';
   const isAdmin = role === 'Admin';
 
   return {

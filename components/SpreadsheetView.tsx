@@ -1,16 +1,16 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { InventoryHook, Component, Kit, KitComponent, ManufacturingHook, FamiliaComponente, View } from '../types';
+import { InventoryHook, Component, Kit, KitComponent, ManufacturingHook, FamiliaComponente, View, CustomersHook, PurchaseOrdersHook, ProductionOrdersHook, ManufacturingOrdersHook, CuttingOrdersHook, Customer, PurchaseOrder, ProductionOrder, ManufacturingOrder, CuttingOrder } from '../types';
 import { Card } from './ui/Card';
 import { Button } from './ui/Button';
 import { useToast } from '../hooks/useToast';
 import { Input } from './ui/Input';
 
-type ActiveTab = 'components' | 'raw_materials' | 'kits' | 'manufacturing';
+type ActiveTab = 'components' | 'raw_materials' | 'kits' | 'manufacturing' | 'customers' | 'purchase_orders' | 'production_orders' | 'manufacturing_orders' | 'cutting_orders';
 
-const formatCurrency = (value: number) => {
-    if (typeof value !== 'number') return 'R$ 0,00';
-    return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const formatCurrency = (value: number | undefined | null) => {
+    if (value === undefined || value === null || isNaN(Number(value))) return 'R$ 0,00';
+    return Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
 interface EditableCellProps {
@@ -86,12 +86,31 @@ const EditableCell: React.FC<EditableCellProps> = ({ value, onSave, type = 'text
 interface SpreadsheetViewProps {
     inventory: InventoryHook;
     manufacturing: ManufacturingHook;
+    customersHook: CustomersHook;
+    purchaseOrdersHook: PurchaseOrdersHook;
+    productionOrdersHook: ProductionOrdersHook;
+    manufacturingOrdersHook: ManufacturingOrdersHook;
+    cuttingOrdersHook: CuttingOrdersHook;
     setCurrentView: (view: View) => void;
 }
 
-export const SpreadsheetView: React.FC<SpreadsheetViewProps> = ({ inventory, manufacturing, setCurrentView }) => {
+export const SpreadsheetView: React.FC<SpreadsheetViewProps> = ({ 
+    inventory, 
+    manufacturing, 
+    customersHook,
+    purchaseOrdersHook,
+    productionOrdersHook,
+    manufacturingOrdersHook,
+    cuttingOrdersHook,
+    setCurrentView 
+}) => {
     const { components, kits, updateMultipleComponents, updateMultipleKits } = inventory;
     const { familias, saveMultipleFamilias, setActiveFamiliaId } = manufacturing;
+    const { customers, updateMultipleCustomers } = customersHook;
+    const { purchaseOrders, updateMultiplePurchaseOrders } = purchaseOrdersHook;
+    const { productionOrders, updateMultipleProductionOrders } = productionOrdersHook;
+    const { manufacturingOrders, updateMultipleManufacturingOrders } = manufacturingOrdersHook;
+    const { cuttingOrders, updateMultipleCuttingOrders } = cuttingOrdersHook;
     const { addToast } = useToast();
 
     const [activeTab, setActiveTab] = useState<ActiveTab>('components');
@@ -99,6 +118,12 @@ export const SpreadsheetView: React.FC<SpreadsheetViewProps> = ({ inventory, man
     const [draftRawMaterials, setDraftRawMaterials] = useState<Component[]>([]);
     const [draftKits, setDraftKits] = useState<Kit[]>([]);
     const [draftFamilias, setDraftFamilias] = useState<FamiliaComponente[]>([]);
+    const [draftCustomers, setDraftCustomers] = useState<Customer[]>([]);
+    const [draftPurchaseOrders, setDraftPurchaseOrders] = useState<PurchaseOrder[]>([]);
+    const [draftProductionOrders, setDraftProductionOrders] = useState<ProductionOrder[]>([]);
+    const [draftManufacturingOrders, setDraftManufacturingOrders] = useState<ManufacturingOrder[]>([]);
+    const [draftCuttingOrders, setDraftCuttingOrders] = useState<CuttingOrder[]>([]);
+    
     const [isDirty, setIsDirty] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     
@@ -108,9 +133,14 @@ export const SpreadsheetView: React.FC<SpreadsheetViewProps> = ({ inventory, man
         setDraftComponents(components.filter(c => c.type === 'component'));
         setDraftRawMaterials(components.filter(c => c.type === 'raw_material'));
         setDraftKits(kits);
-        setDraftFamilias(familias); // Show all familias
+        setDraftFamilias(familias);
+        setDraftCustomers(customers);
+        setDraftPurchaseOrders(purchaseOrders);
+        setDraftProductionOrders(productionOrders);
+        setDraftManufacturingOrders(manufacturingOrders);
+        setDraftCuttingOrders(cuttingOrders);
         setIsDirty(false);
-    }, [components, kits, familias]);
+    }, [components, kits, familias, customers, purchaseOrders, productionOrders, manufacturingOrders, cuttingOrders]);
     
     const formatKitComponents = (components: KitComponent[]): string => components.map(c => `${c.componentSku}:${c.quantity}`).join(', ');
     const formatKitFasteners = (fasteners: { dimension: string; quantity: number }[]): string => fasteners.map(f => `${f.dimension}:${f.quantity}`).join(', ');
@@ -177,6 +207,11 @@ export const SpreadsheetView: React.FC<SpreadsheetViewProps> = ({ inventory, man
                 updateMultipleComponents([...draftComponents, ...draftRawMaterials]),
                 updateMultipleKits(draftKits),
                 saveMultipleFamilias(draftFamilias),
+                updateMultipleCustomers(draftCustomers),
+                updateMultiplePurchaseOrders(draftPurchaseOrders),
+                updateMultipleProductionOrders(draftProductionOrders),
+                updateMultipleManufacturingOrders(draftManufacturingOrders),
+                updateMultipleCuttingOrders(draftCuttingOrders),
             ]);
             setIsDirty(false);
             addToast('Alterações salvas com sucesso!', 'success');
@@ -291,7 +326,11 @@ export const SpreadsheetView: React.FC<SpreadsheetViewProps> = ({ inventory, man
     const componentCols = [ { key: 'name', label: 'Nome' }, { key: 'sku', label: 'SKU' }, { key: 'custoMateriaPrima', label: 'Custo Mat. Prima', type: 'number' as const }, { key: 'custoFabricacao', label: 'Custo Fabricação', type: 'number' as const }, ];
     const rawMaterialCols = [ { key: 'name', label: 'Nome' }, { key: 'sku', label: 'SKU' }, { key: 'purchaseCost', label: 'Custo Compra', type: 'number' as const }, ];
     const kitCols = [ { key: 'name', label: 'Nome' }, { key: 'sku', label: 'SKU' }, { key: 'marca', label: 'Marca' }, { key: 'modelo', label: 'Modelo' }, { key: 'ano', label: 'Ano' }, { key: 'components', label: 'Componentes (SKU:Qtd)', type: 'textarea' as const, format: formatKitComponents }, { key: 'requiredFasteners', label: 'Fixadores (Dimensao:Qtd)', type: 'textarea' as const, format: formatKitFasteners }, ];
-
+    const customerCols = [ { key: 'name', label: 'Nome' }, { key: 'document', label: 'Documento' }, { key: 'phone', label: 'Telefone' }, { key: 'email', label: 'Email' }, { key: 'address', label: 'Endereço' }, ];
+    const purchaseOrderCols = [ { key: 'id', label: 'ID' }, { key: 'supplierName', label: 'Fornecedor' }, { key: 'expectedDeliveryDate', label: 'Entrega Prevista' }, { key: 'status', label: 'Status' }, { key: 'notes', label: 'Notas', type: 'textarea' as const }, ];
+    const productionOrderCols = [ { key: 'id', label: 'ID' }, { key: 'status', label: 'Status' }, { key: 'notes', label: 'Notas', type: 'textarea' as const }, ];
+    const manufacturingOrderCols = [ { key: 'id', label: 'ID' }, { key: 'status', label: 'Status' }, { key: 'predictedCost', label: 'Custo Previsto', type: 'number' as const }, ];
+    const cuttingOrderCols = [ { key: 'id', label: 'ID' }, { key: 'status', label: 'Status' }, { key: 'quantity', label: 'Quantidade', type: 'number' as const }, ];
 
     return (
         <div className="h-[calc(100vh-8rem)] flex flex-col">
@@ -300,7 +339,12 @@ export const SpreadsheetView: React.FC<SpreadsheetViewProps> = ({ inventory, man
                     <TabButton tabId="components">Componentes</TabButton>
                     <TabButton tabId="raw_materials">Matérias-Primas</TabButton>
                     <TabButton tabId="kits">Kits</TabButton>
-                    <TabButton tabId="manufacturing">Processos de Fabricação</TabButton>
+                    <TabButton tabId="manufacturing">Processos</TabButton>
+                    <TabButton tabId="customers">Clientes</TabButton>
+                    <TabButton tabId="purchase_orders">O. Compra</TabButton>
+                    <TabButton tabId="production_orders">O. Produção</TabButton>
+                    <TabButton tabId="manufacturing_orders">O. Fabricação</TabButton>
+                    <TabButton tabId="cutting_orders">O. Corte</TabButton>
                 </div>
                 <div className="flex items-center gap-4">
                     {isDirty && <span className="text-sm text-yellow-600 font-semibold">Alterações não salvas</span>}
@@ -314,6 +358,11 @@ export const SpreadsheetView: React.FC<SpreadsheetViewProps> = ({ inventory, man
                  {activeTab === 'raw_materials' && renderTable(draftRawMaterials, rawMaterialCols, setDraftRawMaterials)}
                  {activeTab === 'kits' && renderTable(draftKits, kitCols, setDraftKits)}
                  {activeTab === 'manufacturing' && renderManufacturingTable()}
+                 {activeTab === 'customers' && renderTable(draftCustomers, customerCols, setDraftCustomers)}
+                 {activeTab === 'purchase_orders' && renderTable(draftPurchaseOrders, purchaseOrderCols, setDraftPurchaseOrders)}
+                 {activeTab === 'production_orders' && renderTable(draftProductionOrders, productionOrderCols, setDraftProductionOrders)}
+                 {activeTab === 'manufacturing_orders' && renderTable(draftManufacturingOrders, manufacturingOrderCols, setDraftManufacturingOrders)}
+                 {activeTab === 'cutting_orders' && renderTable(draftCuttingOrders, cuttingOrderCols, setDraftCuttingOrders)}
             </Card>
         </div>
     );

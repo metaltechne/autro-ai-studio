@@ -13,9 +13,9 @@ interface TechnicalSheetModalProps {
   manufacturing: ManufacturingHook;
 }
 
-const formatCurrency = (value: number) => {
-    if (typeof value !== 'number' || isNaN(value)) return 'R$ 0,00';
-    return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const formatCurrency = (value: number | undefined | null) => {
+    if (value === undefined || value === null || isNaN(Number(value))) return 'R$ 0,00';
+    return Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 };
 
 const DataRow: React.FC<{ label: string; value: React.ReactNode; className?: string }> = ({ label, value, className = '' }) => (

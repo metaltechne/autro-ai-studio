@@ -1,7 +1,7 @@
 import React from 'react';
-import { Modal } from './ui/Modal';
-import { Button } from './ui/Button';
-import { Component, InventoryLog, InventoryLogReason } from '../types';
+import { Modal } from './components/ui/Modal';
+import { Button } from './components/ui/Button';
+import { Component, InventoryLog, InventoryLogReason } from './types';
 
 interface InventoryHistoryModalProps {
   isOpen: boolean;

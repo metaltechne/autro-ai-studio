@@ -10,7 +10,7 @@ import { Input } from './components/ui/Input';
 import { useFinancials } from './contexts/FinancialsContext';
 import { BRAZIL_UFS } from './contexts/FinancialsContext';
 import { Select } from './components/ui/Select';
-import { nanoid } from 'https://esm.sh/nanoid@5.0.7';
+import { nanoid } from 'nanoid';
 
 interface SettingsViewProps {
     inventory: InventoryHook;

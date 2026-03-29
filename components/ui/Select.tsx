@@ -14,7 +14,7 @@ export const Select: React.FC<SelectProps> = ({ label, id, className = '', child
       <div className="relative">
         <select
           id={id}
-          className={`w-full px-4 py-3 border border-slate-200 bg-white rounded-xl shadow-sm focus:ring-2 focus:ring-slate-900/5 focus:border-slate-900 text-sm text-slate-900 appearance-none disabled:bg-slate-50 disabled:text-slate-400 ${className}`}
+          className={`w-full px-3 py-2 sm:px-4 sm:py-3 border border-slate-200 bg-white rounded-xl shadow-sm focus:ring-2 focus:ring-slate-900/5 focus:border-slate-900 text-xs sm:text-sm text-slate-900 appearance-none disabled:bg-slate-50 disabled:text-slate-400 ${className}`}
           {...props}
         >
             {children}

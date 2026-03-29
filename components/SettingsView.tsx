@@ -4,12 +4,12 @@ import { Button } from './ui/Button';
 import { ConfirmationModal } from './ui/ConfirmationModal';
 import * as api from '../hooks/api';
 import { useToast } from '../hooks/useToast';
-import { BackupData, FinancialSettings, InventoryHook, PromotionalCampaign, ManufacturingHook } from '../types';
+import { BackupData, FinancialSettings, InventoryHook, PromotionalCampaign, ManufacturingHook, Kit } from '../types';
 import { Input } from './ui/Input';
 import { useFinancials } from '../contexts/FinancialsContext';
 import { BRAZIL_UFS } from '../contexts/FinancialsContext';
 import { Select } from './ui/Select';
-import { nanoid } from 'https://esm.sh/nanoid@5.0.7';
+import { nanoid } from 'nanoid';
 
 interface SettingsViewProps {
     inventory: InventoryHook;
@@ -23,7 +23,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ inventory, manufactu
     const restoreInputRef = useRef<HTMLInputElement>(null);
     const [isDownloading, setIsDownloading] = useState(false);
     const [isRestoring, setIsRestoring] = useState(false);
+    const [isImportingKits, setIsImportingKits] = useState(false);
     const [backupFileContent, setBackupFileContent] = useState<BackupData | null>(null);
+    const [kitsToImport, setKitsToImport] = useState<Kit[] | null>(null);
+    const [activeBackupTab, setActiveBackupTab] = useState<'full' | 'kits'>('full');
     const { settings, saveSettings, isLoading: isFinancialsLoading } = useFinancials();
     const [financialForm, setFinancialForm] = useState<FinancialSettings | null>(null);
 
@@ -42,8 +45,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ inventory, manufactu
 
     // Maintenance State
     const [isRebuilding, setIsRebuilding] = useState(false);
-
-    
     useEffect(() => {
         if (settings) {
             setFinancialForm(settings);
@@ -117,6 +118,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ inventory, manufactu
         restoreInputRef.current?.click();
     };
 
+    const handleKitImportClick = () => {
+        restoreInputRef.current?.click();
+    };
+
     const handleFileSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
         if (!file) return;
@@ -129,24 +134,35 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ inventory, manufactu
 
                 const parsedData = JSON.parse(content) as BackupData;
                 
-                // Simple validation to check if it looks like our backup file
-                if (
-                    parsedData.hasOwnProperty('components') &&
-                    parsedData.hasOwnProperty('kits') &&
-                    parsedData.hasOwnProperty('inventoryLogs')
-                ) {
-                    setBackupFileContent(parsedData);
+                if (activeBackupTab === 'full') {
+                    // Simple validation to check if it looks like our backup file
+                    if (
+                        parsedData.hasOwnProperty('components') &&
+                        parsedData.hasOwnProperty('kits') &&
+                        parsedData.hasOwnProperty('inventoryLogs')
+                    ) {
+                        setBackupFileContent(parsedData);
+                    } else {
+                        throw new Error('O arquivo não parece ser um backup válido.');
+                    }
                 } else {
-                    throw new Error('O arquivo não parece ser um backup válido.');
+                    // Import only kits
+                    if (parsedData.hasOwnProperty('kits') && Array.isArray(parsedData.kits)) {
+                        setKitsToImport(parsedData.kits);
+                    } else {
+                        throw new Error('O arquivo não contém dados de kits válidos.');
+                    }
                 }
             } catch (error: any) {
                 addToast(error.message || 'Arquivo de backup inválido ou corrompido.', 'error');
                 setBackupFileContent(null);
+                setKitsToImport(null);
             }
         };
         reader.onerror = () => {
              addToast('Falha ao ler o arquivo.', 'error');
              setBackupFileContent(null);
+             setKitsToImport(null);
         }
         reader.readAsText(file);
         
@@ -167,6 +183,35 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ inventory, manufactu
             addToast('Falha ao restaurar os dados.', 'error');
             setIsRestoring(false);
             setBackupFileContent(null);
+        }
+    };
+
+    const handleConfirmKitsImport = async () => {
+        if (!kitsToImport) return;
+        setIsImportingKits(true);
+        try {
+            const currentKits = await api.getKits();
+            const mergedKits = [...currentKits];
+            
+            kitsToImport.forEach(newKit => {
+                const existingIndex = mergedKits.findIndex(k => k.sku === newKit.sku);
+                if (existingIndex >= 0) {
+                    mergedKits[existingIndex] = newKit;
+                } else {
+                    mergedKits.push(newKit);
+                }
+            });
+
+            await api.saveKits(mergedKits);
+            addToast(`${kitsToImport.length} kits importados/atualizados com sucesso! A página será recarregada.`, 'success');
+            setTimeout(() => {
+                window.location.reload();
+            }, 2000);
+        } catch (error) {
+            console.error('Failed to import kits:', error);
+            addToast('Falha ao importar os kits.', 'error');
+            setIsImportingKits(false);
+            setKitsToImport(null);
         }
     };
     
@@ -238,24 +283,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ inventory, manufactu
         }
     };
 
-    const handleForceRebuild = async () => {
-        setIsRebuilding(true);
-        try {
-            const result = await api.forceRebuildCorruptedProcesses();
-            if (result === 'rebuilt') {
-                addToast('Processos corrompidos foram reconstruídos! A página será recarregada.', 'success');
-                setTimeout(() => window.location.reload(), 2000);
-            } else if (result === 'no_issues') {
-                addToast('Nenhum processo corrompido encontrado para reconstruir.', 'info');
-            } else {
-                throw new Error("API call to rebuild failed");
-            }
-        } catch (error) {
-            addToast('Ocorreu um erro ao tentar reconstruir os processos.', 'error');
-        } finally {
-            setIsRebuilding(false);
-        }
-    };
 
     return (
         <div>
@@ -436,32 +463,65 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ inventory, manufactu
                 <Card>
                     <h3 className="text-xl font-semibold text-black mb-2">Backup e Restauração de Dados</h3>
                     <p className="text-sm text-gray-600 mb-6">
-                        Faça o download de todos os dados do sistema para um único arquivo. Use este arquivo para restaurar o sistema a um estado anterior.
+                        Gerencie seus dados baixando backups completos ou importando partes específicas de arquivos de backup anteriores.
                     </p>
-                    <div className="flex flex-col sm:flex-row gap-4">
-                         <Button
-                            onClick={handleDownloadBackup}
-                            disabled={isDownloading}
-                            className="flex-1"
+
+                    <div className="flex border-b mb-6">
+                        <button 
+                            className={`px-4 py-2 font-medium text-sm transition-colors ${activeBackupTab === 'full' ? 'text-autro-blue border-b-2 border-autro-blue' : 'text-gray-500 hover:text-gray-700'}`}
+                            onClick={() => setActiveBackupTab('full')}
                         >
-                            {isDownloading ? 'Gerando...' : 'Baixar Backup Completo'}
-                        </Button>
-                        <Button
-                            onClick={handleRestoreClick}
-                            variant="secondary"
-                            className="flex-1"
-                            disabled={isRestoring}
+                            Backup Completo
+                        </button>
+                        <button 
+                            className={`px-4 py-2 font-medium text-sm transition-colors ${activeBackupTab === 'kits' ? 'text-autro-blue border-b-2 border-autro-blue' : 'text-gray-500 hover:text-gray-700'}`}
+                            onClick={() => setActiveBackupTab('kits')}
                         >
-                            Restaurar a partir de um Arquivo
-                        </Button>
-                        <input
-                            type="file"
-                            accept=".json"
-                            ref={restoreInputRef}
-                            onChange={handleFileSelected}
-                            className="hidden"
-                        />
+                            Importar Apenas Kits
+                        </button>
                     </div>
+
+                    {activeBackupTab === 'full' ? (
+                        <div className="flex flex-col sm:flex-row gap-4">
+                            <Button
+                                onClick={handleDownloadBackup}
+                                disabled={isDownloading}
+                                className="flex-1"
+                            >
+                                {isDownloading ? 'Gerando...' : 'Baixar Backup Completo'}
+                            </Button>
+                            <Button
+                                onClick={handleRestoreClick}
+                                variant="secondary"
+                                className="flex-1"
+                                disabled={isRestoring}
+                            >
+                                Restaurar Backup Completo
+                            </Button>
+                        </div>
+                    ) : (
+                        <div className="space-y-4">
+                            <p className="text-sm text-gray-600">
+                                Selecione um arquivo de backup padrão para extrair e importar apenas os kits. Isso irá mesclar os kits do arquivo com os kits atuais (kits com o mesmo SKU serão atualizados).
+                            </p>
+                            <Button
+                                onClick={handleKitImportClick}
+                                variant="secondary"
+                                className="w-full sm:w-auto"
+                                disabled={isImportingKits}
+                            >
+                                Selecionar Arquivo para Importar Kits
+                            </Button>
+                        </div>
+                    )}
+
+                    <input
+                        type="file"
+                        accept=".json"
+                        ref={restoreInputRef}
+                        onChange={handleFileSelected}
+                        className="hidden"
+                    />
                 </Card>
 
                 <Card className="border-red-500">
@@ -473,10 +533,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ inventory, manufactu
                     <div className="border-t pt-4">
                         <h4 className="font-semibold text-black">1. Reparar Processos Padrão Corrompidos</h4>
                         <p className="text-sm text-gray-500 my-2">
-                            Use esta option primeiro se processos como 'FIX-P' ou 'POR-P' pararam de funcionar após restaurar um backup. Isso tentará consertá-los sem apagar outros dados.
+                            Use esta opção para aplicar a nova estrutura de famílias (FIX-S e FIX-P) e remover processos antigos.
                         </p>
-                        <Button onClick={handleForceRebuild} variant="secondary" disabled={isRebuilding}>
-                            {isRebuilding ? 'Reparando...' : 'Reparar Processos'}
+                        <Button onClick={async () => {
+                            await api.applyCustomFamilyCleanup();
+                            addToast('Famílias atualizadas! A página será recarregada.', 'success');
+                            setTimeout(() => window.location.reload(), 1500);
+                        }} variant="secondary">
+                            Aplicar Limpeza de Famílias
                         </Button>
                     </div>
 
@@ -520,13 +584,83 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ inventory, manufactu
                     confirmText="Sim, Restaurar e Substituir Tudo"
                     variant="danger"
                 >
-                    <div className="text-left space-y-3">
-                        <p className="font-bold text-red-600">ATENÇÃO: AÇÃO IRREVERSÍVEL!</p>
-                        <p className="text-sm text-gray-700">
-                            Você está prestes a substituir <span className="font-bold">TODOS</span> os dados atuais do sistema pelo conteúdo do arquivo de backup.
-                        </p>
-                        <p className="text-sm text-gray-700">
+                    <div className="text-left space-y-4">
+                        <div className="p-3 bg-red-50 border border-red-100 rounded-md">
+                            <p className="font-bold text-red-700 text-sm">ATENÇÃO: AÇÃO IRREVERSÍVEL!</p>
+                            <p className="text-xs text-red-600 mt-1">
+                                Você está prestes a substituir <span className="font-bold underline">TODOS</span> os dados atuais do sistema pelo conteúdo do arquivo de backup.
+                            </p>
+                        </div>
+
+                        {backupFileContent && (
+                            <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                                <h4 className="text-xs font-bold text-gray-500 mb-3 uppercase tracking-wider">Conteúdo do Backup:</h4>
+                                <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
+                                    <div className="flex justify-between border-b border-gray-100 pb-1">
+                                        <span className="text-gray-600">Componentes:</span>
+                                        <span className="font-mono font-bold text-autro-blue">{backupFileContent.components?.length || 0}</span>
+                                    </div>
+                                    <div className="flex justify-between border-b border-gray-100 pb-1">
+                                        <span className="text-gray-600">Kits:</span>
+                                        <span className="font-mono font-bold text-autro-blue">{backupFileContent.kits?.length || 0}</span>
+                                    </div>
+                                    <div className="flex justify-between border-b border-gray-100 pb-1">
+                                        <span className="text-gray-600">Processos:</span>
+                                        <span className="font-mono font-bold text-autro-blue">{backupFileContent.familias?.length || 0}</span>
+                                    </div>
+                                    <div className="flex justify-between border-b border-gray-100 pb-1">
+                                        <span className="text-gray-600">Ordens:</span>
+                                        <span className="font-mono font-bold text-autro-blue">
+                                            {(backupFileContent.purchaseOrders?.length || 0) + 
+                                             (backupFileContent.productionOrders?.length || 0) + 
+                                             (backupFileContent.manufacturingOrders?.length || 0)}
+                                        </span>
+                                    </div>
+                                </div>
+                                <p className="text-[10px] text-gray-400 mt-4 italic">
+                                    Data do Backup: {backupFileContent.lastModified ? new Date(backupFileContent.lastModified).toLocaleString('pt-BR') : 'Desconhecida'}
+                                </p>
+                            </div>
+                        )}
+
+                        <p className="text-sm text-gray-700 font-medium text-center">
                            Tem certeza que deseja continuar?
+                        </p>
+                    </div>
+                </ConfirmationModal>
+            )}
+
+            {kitsToImport && (
+                <ConfirmationModal
+                    isOpen={!!kitsToImport}
+                    onClose={() => setKitsToImport(null)}
+                    onConfirm={handleConfirmKitsImport}
+                    title="Confirmar Importação de Kits"
+                    isConfirming={isImportingKits}
+                    confirmText="Sim, Importar Kits"
+                    variant="secondary"
+                >
+                    <div className="text-left space-y-4">
+                        <div className="p-3 bg-blue-50 border border-blue-100 rounded-md">
+                            <p className="font-bold text-blue-700 text-sm">IMPORTAÇÃO PARCIAL</p>
+                            <p className="text-xs text-blue-600 mt-1">
+                                Você está prestes a importar <span className="font-bold underline">{kitsToImport.length}</span> kits do arquivo de backup.
+                            </p>
+                        </div>
+
+                        <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                            <p className="text-sm text-gray-700">
+                                Esta ação irá:
+                            </p>
+                            <ul className="list-disc list-inside text-xs text-gray-600 mt-2 space-y-1">
+                                <li>Adicionar novos kits que não existem no sistema</li>
+                                <li>Atualizar kits existentes que possuem o mesmo SKU</li>
+                                <li><span className="font-bold">Manter</span> todos os outros dados (componentes, ordens, etc.) intactos</li>
+                            </ul>
+                        </div>
+
+                        <p className="text-sm text-gray-700 font-medium text-center">
+                           Deseja prosseguir com a importação dos kits?
                         </p>
                     </div>
                 </ConfirmationModal>

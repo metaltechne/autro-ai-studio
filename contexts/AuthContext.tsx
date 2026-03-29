@@ -15,25 +15,39 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const getUserRoleFromFirebase = async (uid: string, email: string | null): Promise<UserRole> => {
-    if (email === 'antonio.marcos@autro.com.br') {
+    if (email === 'antonio.marcos@autro.com.br' || email === 'max2dserver@gmail.com') {
         return 'Admin';
     }
 
     try {
         const userRoles = await api.getUserRoles();
-        const userProfile = userRoles.find(u => u.uid === uid);
+        let userProfile = userRoles.find(u => u.uid === uid);
+        
+        // Se não achou por UID, tenta achar por email (caso tenha sido pré-cadastrado)
+        if (!userProfile && email) {
+            userProfile = userRoles.find(u => u.email === email);
+            if (userProfile) {
+                // Atualiza o UID do usuário pré-cadastrado
+                userProfile.uid = uid;
+                await api.saveUserRoles(userRoles);
+            }
+        }
         
         if (userProfile) {
-            return userProfile.role;
+            // Map old roles to new ones
+            let role = userProfile.role as string;
+            if (role === 'Gerente') role = 'Gestor';
+            if (role === 'Operador') role = 'Linha de Produção';
+            return role as UserRole;
         } else {
-            // User not found, so add them with default role 'Operador'
-            const newUserProfile: UserProfile = { uid, email: email || 'unknown', role: 'Operador' };
+            // User not found, so add them with default role 'Linha de Produção'
+            const newUserProfile: UserProfile = { uid, email: email || 'unknown', role: 'Linha de Produção' };
             await api.saveUserRoles([...userRoles, newUserProfile]);
-            return 'Operador';
+            return 'Linha de Produção';
         }
     } catch(e) {
         console.error("Failed to get/update user role from Firebase", e);
-        return 'Operador'; // Fallback to the most restrictive role
+        return 'Linha de Produção'; // Fallback to the most restrictive role
     }
 };
 

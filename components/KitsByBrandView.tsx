@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 // FIX: Import KitComponent to resolve type errors.
-import { InventoryHook, Kit, ManufacturingHook, AggregatedPart, SaleDetails, QuoteItem, KitComponent, Component } from '../types';
+import { InventoryHook, Kit, ManufacturingHook, AggregatedPart, SaleDetails, QuoteItem, KitComponent, Component, KitCostDetails, KitCostBreakdownItem } from '../types';
 import { Card } from './ui/Card';
 import { evaluateProcess, getComponentCost } from '../hooks/manufacturing-evaluator';
 import { Select } from './ui/Select';
@@ -9,6 +9,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { EmailReportModal } from './ui/EmailReportModal';
+import { SaleDetailsModal } from './ui/SaleDetailsModal';
 import { useFinancials } from '../contexts/FinancialsContext';
 import { Input } from './ui/Input';
 
@@ -17,7 +18,10 @@ interface KitsByBrandViewProps {
     manufacturing: ManufacturingHook;
 }
 
-const formatCurrency = (value: number) => value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const formatCurrency = (value: number | undefined | null) => {
+    if (value === undefined || value === null || isNaN(Number(value))) return 'R$ 0,00';
+    return Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+};
 
 const StatCard: React.FC<{ title: string; value: string | number; description?: string }> = ({ title, value, description }) => (
     <div className="bg-autro-blue-light p-4 rounded-lg">
@@ -37,6 +41,7 @@ export const KitsByBrandView: React.FC<KitsByBrandViewProps> = ({ inventory, man
   const [isEmailModalOpen, setIsEmailModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'analysis' | 'catalog'>('analysis');
   const [quoteItems, setQuoteItems] = useState<Map<string, QuoteItem>>(new Map());
+  const [saleDetailsModalData, setSaleDetailsModalData] = useState<{ kitName: string; cost: number; materialCost?: number; fabricationCost?: number; saleDetails?: SaleDetails; breakdown?: KitCostBreakdownItem[] } | null>(null);
 
 
   const filterOptions = useMemo(() => {
@@ -60,54 +65,195 @@ export const KitsByBrandView: React.FC<KitsByBrandViewProps> = ({ inventory, man
   }
   
   const kitCostsAndSales = useMemo(() => {
-    const costMap = new Map<string, { cost: number, saleDetails: SaleDetails }>();
-    const preferredId = settings?.preferredFastenerFamiliaId || 'fam-fixadores';
-    const fastenerFamilia = familias.find(f => f.id === preferredId);
+    const costMap = new Map<string, KitCostDetails>();
+    const fastenerFamilia = familias.find(f => f.id === 'fam-fixadores');
+    const fixSFamilia = manufacturing.familias.find(f => f.id === 'fam-MONTAGEM-FIX-S' || f.nome?.toLowerCase() === 'montagem fix-s');
+    const fixPFamilia = manufacturing.familias.find(f => f.id === 'fam-MONTAGEM-FIX-P' || f.nome?.toLowerCase() === 'montagem fix-p');
+    const porPFamilia = manufacturing.familias.find(f => f.id === 'fam-MONTAGEM-POR-P' || f.nome?.toLowerCase() === 'montagem por-p');
+    
     const fastenerCostCache = new Map<string, number>();
-    const componentSkuMap = new Map<string, Component>(components.map(c => [c.sku, c]));
+    const fixSCostCache = new Map<string, number>();
+    const fixPCostCache = new Map<string, number>();
+    const porPCostCache = new Map<string, number>();
+    
+    const componentSkuMap = new Map<string, Component>(components.map(c => [c.sku.toUpperCase(), c]));
 
-    const getFastenerCost = (dimension: string): number => {
-      if (fastenerCostCache.has(dimension)) {
-        return fastenerCostCache.get(dimension)!;
+    const getFastenerCostForFamily = (dimension: string, familia: any, cache: Map<string, number>): number => {
+      if (!familia) return 0;
+      if (cache.has(dimension)) {
+        return cache.get(dimension)!;
       }
-      if (fastenerFamilia) {
-        const simpleDim = dimension.replace('mm','');
-        const [bitolaStr, comprimentoStr] = simpleDim.split('x');
-        const bitola = parseInt(bitolaStr, 10);
-        const comprimento = parseInt(comprimentoStr, 10);
-        if (!isNaN(bitola) && !isNaN(comprimento)) {
-            const result = evaluateProcess(
-                fastenerFamilia,
-                { bitola, comprimento },
-                inventory.components
-            );
-            const cost = result.custoMateriaPrima + result.custoFabricacao;
-            fastenerCostCache.set(dimension, cost);
-            return cost;
-        }
+      const simpleDim = dimension.replace(/mm/i, '').replace(/M/i, '');
+      const [bitolaStr, comprimentoStr] = simpleDim.split('x');
+      const bitola = parseInt(bitolaStr, 10);
+      const comprimento = parseInt(comprimentoStr, 10);
+      if (!isNaN(bitola) && !isNaN(comprimento)) {
+          const result = evaluateProcess(
+              familia,
+              { bitola, comprimento },
+              inventory.components,
+              {},
+              { allFamilias: manufacturing.familias }
+          );
+          const cost = result.custoMateriaPrima + result.custoFabricacao;
+          cache.set(dimension, cost);
+          return cost;
       }
       return 0;
     };
 
-    for (const kit of kits) {
-      let totalCost = 0;
-      // FIX: Add explicit type to forEach callback parameter to resolve 'unknown' type error.
-      kit.components.forEach((kc: KitComponent) => {
-        const component = componentSkuMap.get(kc.componentSku);
+    for (const kit of (kits || [])) {
+      let baseTotalCost = 0;
+      let baseMaterialCost = 0;
+      let baseFabricationCost = 0;
+      const breakdown: KitCostBreakdownItem[] = [];
+      
+      (kit.components || []).forEach((kc: KitComponent) => {
+        const component = componentSkuMap.get(kc.componentSku.toUpperCase());
         if (component) {
-          totalCost += getComponentCost(component) * kc.quantity;
+          const unitCost = getComponentCost(component);
+          const itemTotalCost = unitCost * kc.quantity;
+          
+          let materialCost = 0;
+          let fabricationCost = 0;
+          
+          if (component.type === 'raw_material' || component.sourcing === 'purchased') {
+            materialCost = itemTotalCost;
+          } else {
+            materialCost = (component.custoMateriaPrima || 0) * kc.quantity;
+            fabricationCost = (component.custoFabricacao || 0) * kc.quantity;
+          }
+          
+          baseMaterialCost += materialCost;
+          baseFabricationCost += fabricationCost;
+          baseTotalCost += itemTotalCost;
+          
+          breakdown.push({
+            name: component.name, sku: component.sku, quantity: kc.quantity,
+            unitCost: unitCost, totalCost: itemTotalCost, type: 'Componente'
+          });
         }
       });
-      if (kit.requiredFasteners) {
+
+      let defaultTotalCost = baseTotalCost;
+      let defaultMaterialCost = baseMaterialCost;
+      let defaultFabricationCost = baseFabricationCost;
+      const defaultBreakdown = [...breakdown];
+      if (kit.requiredFasteners && Array.isArray(kit.requiredFasteners)) {
         kit.requiredFasteners.forEach(rf => {
-          totalCost += getFastenerCost(rf.dimension) * rf.quantity;
+          if (!rf.dimension) return;
+          const isNut = rf.dimension.includes('x0') || rf.dimension.endsWith('x0');
+          let familiaToUse = isNut ? porPFamilia : fixSFamilia;
+          
+          if (kit.selectedFamiliaId) {
+              const selectedFamilia = manufacturing.familias.find(f => f.id === kit.selectedFamiliaId);
+              if (selectedFamilia) {
+                  const isSelectedFamiliaNut = selectedFamilia.nome?.toLowerCase().includes('por-p') || selectedFamilia.nome?.toLowerCase().includes('por p');
+                  if (isNut && isSelectedFamiliaNut) {
+                      familiaToUse = selectedFamilia;
+                  } else if (!isNut && !isSelectedFamiliaNut) {
+                      familiaToUse = selectedFamilia;
+                  }
+              }
+          }
+
+          const unitCost = getFastenerCostForFamily(rf.dimension, familiaToUse || fastenerFamilia, fastenerCostCache);
+          const itemTotalCost = unitCost * rf.quantity;
+          defaultTotalCost += itemTotalCost;
+          defaultMaterialCost += itemTotalCost; // Fasteners are material cost
+          defaultBreakdown.push({
+            name: isNut ? `Porca M${rf.dimension.split('x')[0]}` : `Fixador ${rf.dimension}`, sku: `DIM-${rf.dimension}`, quantity: rf.quantity,
+            unitCost, totalCost: itemTotalCost, type: 'Fixador'
+          });
         });
       }
-      const saleDetails = calculateSaleDetails(totalCost, { priceOverride: kit.sellingPriceOverride, strategy: kit.pricingStrategy });
-      costMap.set(kit.id, { cost: totalCost, saleDetails });
+
+      let currentKeyName = undefined;
+      if (kit.selectedKeyId) {
+          const kitKey = components.find(c => c.id === kit.selectedKeyId);
+          if (kitKey) {
+              const currentKeyCost = getComponentCost(kitKey);
+              currentKeyName = kitKey.name;
+              defaultTotalCost += currentKeyCost;
+              defaultBreakdown.push({
+                  name: kitKey.name, sku: kitKey.sku, quantity: 1,
+                  unitCost: currentKeyCost, totalCost: currentKeyCost, type: 'Chave',
+              });
+          }
+      }
+
+      const saleDetails = calculateSaleDetails(defaultTotalCost, { priceOverride: kit.sellingPriceOverride, strategy: kit.pricingStrategy });
+
+      const options: KitCostDetails['options'] = {};
+      
+      const fasteners = kit.requiredFasteners || [];
+      const hasNuts = fasteners.some(rf => {
+          const parts = rf.dimension.split('x');
+          return parts.length > 1 && parseInt(parts[1]) === 0;
+      });
+      const hasScrews = fasteners.some(rf => {
+          const parts = rf.dimension.split('x');
+          return parts.length > 1 && parseInt(parts[1]) > 0;
+      });
+
+      if (fixSFamilia && hasScrews) {
+        let fixSTotalCost = baseTotalCost;
+        let fixSMaterialCost = baseMaterialCost;
+        const fixSBreakdown = [...breakdown];
+        kit.requiredFasteners?.forEach(rf => {
+          const unitCost = getFastenerCostForFamily(rf.dimension, fixSFamilia, fixSCostCache);
+          const itemTotalCost = unitCost * rf.quantity;
+          fixSTotalCost += itemTotalCost;
+          fixSMaterialCost += itemTotalCost;
+          fixSBreakdown.push({
+            name: `Fixador ${rf.dimension}`, sku: `DIM-${rf.dimension}`, quantity: rf.quantity,
+            unitCost, totalCost: itemTotalCost, type: 'Fixador'
+          });
+        });
+        options.fixS = {
+          totalCost: fixSTotalCost,
+          materialCost: fixSMaterialCost,
+          fabricationCost: baseFabricationCost,
+          saleDetails: calculateSaleDetails(fixSTotalCost, { priceOverride: kit.sellingPriceOverride, strategy: kit.pricingStrategy }),
+          breakdown: fixSBreakdown
+        };
+      }
+
+      if (fixPFamilia && hasScrews) {
+        let fixPTotalCost = baseTotalCost;
+        let fixPMaterialCost = baseMaterialCost;
+        const fixPBreakdown = [...breakdown];
+        kit.requiredFasteners?.forEach(rf => {
+          const unitCost = getFastenerCostForFamily(rf.dimension, fixPFamilia, fixPCostCache);
+          const itemTotalCost = unitCost * rf.quantity;
+          fixPTotalCost += itemTotalCost;
+          fixPMaterialCost += itemTotalCost;
+          fixPBreakdown.push({
+            name: `Fixador ${rf.dimension}`, sku: `DIM-${rf.dimension}`, quantity: rf.quantity,
+            unitCost, totalCost: itemTotalCost, type: 'Fixador'
+          });
+        });
+        options.fixP = {
+          totalCost: fixPTotalCost,
+          materialCost: fixPMaterialCost,
+          fabricationCost: baseFabricationCost,
+          saleDetails: calculateSaleDetails(fixPTotalCost, { priceOverride: kit.sellingPriceOverride, strategy: kit.pricingStrategy }),
+          breakdown: fixPBreakdown
+        };
+      }
+
+      costMap.set(kit.id, { 
+        totalCost: defaultTotalCost, 
+        materialCost: defaultMaterialCost, 
+        fabricationCost: defaultFabricationCost, 
+        breakdown: defaultBreakdown, 
+        saleDetails,
+        keyName: currentKeyName,
+        options
+      });
     }
     return costMap;
-  }, [kits, familias, components, inventory.components, calculateSaleDetails, settings]);
+  }, [kits, familias, components, inventory.components, calculateSaleDetails, manufacturing.familias]);
   
   const filteredKits = useMemo(() => {
     if (!selectedBrand) return [];
@@ -127,8 +273,7 @@ export const KitsByBrandView: React.FC<KitsByBrandViewProps> = ({ inventory, man
 
     for(const kit of filteredKits) {
         const details = kitCostsAndSales.get(kit.id);
-        totalCostValue += details?.cost || 0;
-        // FIX: Added optional chaining to prevent 'cannot read properties of undefined' errors when accessing nested 'saleDetails' properties.
+        totalCostValue += details?.totalCost || 0;
         totalSaleValue += details?.saleDetails?.sellingPrice || 0;
         modelSet.add(kit.modelo);
     }
@@ -149,16 +294,18 @@ export const KitsByBrandView: React.FC<KitsByBrandViewProps> = ({ inventory, man
     const fastenerCostCache = new Map<string, number>();
     const componentSkuMap = new Map<string, Component>(components.map(c => [c.sku, c]));
 
-    const getFastenerCost = (bitola: number, comprimento: number): number => {
-        const cacheKey = `${bitola}x${comprimento}`;
+    const getFastenerCost = (bitola: number, comprimento: number, familiaToUse: any): number => {
+        const cacheKey = `${bitola}x${comprimento}-${familiaToUse?.id || 'default'}`;
         if (fastenerCostCache.has(cacheKey)) {
             return fastenerCostCache.get(cacheKey)!;
         }
-        if (fastenerFamilia) {
+        if (familiaToUse) {
             const result = evaluateProcess(
-                fastenerFamilia,
+                familiaToUse,
                 { bitola, comprimento },
-                inventory.components
+                inventory.components,
+                {},
+                { allFamilias: manufacturing.familias }
             );
             const cost = result.custoMateriaPrima + result.custoFabricacao;
             fastenerCostCache.set(cacheKey, cost);
@@ -180,7 +327,7 @@ export const KitsByBrandView: React.FC<KitsByBrandViewProps> = ({ inventory, man
         }
       });
 
-      if (fastenerFamilia && kit.requiredFasteners) {
+      if (kit.requiredFasteners) {
         for (const { dimension, quantity } of kit.requiredFasteners) {
           const simpleDim = dimension.replace('mm','');
           const [bitolaStr, comprimentoStr] = simpleDim.split('x');
@@ -194,7 +341,12 @@ export const KitsByBrandView: React.FC<KitsByBrandViewProps> = ({ inventory, man
             sku, totalQuantity: 0, totalValue: 0
           };
           
-          const cost = getFastenerCost(bitola, comprimento);
+          const isNut = dimension.includes('x0') || dimension.endsWith('x0');
+          const fixSFamilia = manufacturing.familias.find(f => f.id === 'fam-MONTAGEM-FIX-S' || f.nome?.toLowerCase() === 'montagem fix-s');
+          const porPFamilia = manufacturing.familias.find(f => f.id === 'fam-MONTAGEM-POR-P' || f.nome?.toLowerCase() === 'montagem por-p');
+          const familiaToUse = isNut ? porPFamilia : fixSFamilia;
+          
+          const cost = getFastenerCost(bitola, comprimento, familiaToUse || fastenerFamilia);
           current.totalQuantity += quantity;
           current.totalValue += quantity * cost;
           partsMap.set(sku, current);
@@ -511,7 +663,7 @@ export const KitsByBrandView: React.FC<KitsByBrandViewProps> = ({ inventory, man
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{kit.modelo}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{kit.ano}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{kit.sku}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-black">{formatCurrency(details?.cost || 0)}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-black">{formatCurrency(details?.totalCost || 0)}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-autro-blue">{formatCurrency(details?.saleDetails?.sellingPrice || 0)}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-green-700">
                                                 {formatCurrency(details?.saleDetails?.contributionMargin || 0)}
@@ -576,15 +728,85 @@ export const KitsByBrandView: React.FC<KitsByBrandViewProps> = ({ inventory, man
                     {filteredKits.map(kit => {
                         const details = kitCostsAndSales.get(kit.id);
                         return (
-                            <Card key={kit.id} className="flex flex-col">
-                                <h4 className="font-bold text-black">{kit.name}</h4>
-                                <p className="text-sm text-gray-500 mb-2">SKU: {kit.sku}</p>
-                                <div className="text-sm border-t pt-2 mt-2 space-y-1 flex-grow">
-                                    <p><strong>Preço de Venda:</strong> <span className="font-semibold text-autro-blue">{formatCurrency(details?.saleDetails?.sellingPrice || 0)}</span></p>
-                                    <p><strong>Custo:</strong> <span className="font-semibold">{formatCurrency(details?.cost || 0)}</span></p>
-                                    <p><strong>Margem:</strong> <span className="font-semibold text-green-700">{formatCurrency(details?.saleDetails?.contributionMargin || 0)} ({(details?.saleDetails?.contributionMarginPercentage || 0).toFixed(1)}%)</span></p>
+                            <Card key={kit.id} className="flex flex-col p-0 overflow-hidden group border-none shadow-soft hover:shadow-float transition-all duration-300">
+                                <div className="h-32 bg-autro-blue relative flex items-center justify-center overflow-hidden">
+                                    <div className="absolute inset-0 opacity-10">
+                                        <div className="absolute inset-0" style={{ backgroundImage: 'radial-gradient(circle at 2px 2px, white 1px, transparent 0)', backgroundSize: '20px 20px' }}></div>
+                                    </div>
+                                    <div className="relative z-10 flex flex-col items-center">
+                                        <div className="w-16 h-16 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center mb-2 border border-white/20">
+                                            <span className="text-2xl font-black text-white tracking-tighter">{(kit.marca || '??').substring(0, 2).toUpperCase()}</span>
+                                        </div>
+                                        <span className="text-[10px] font-bold text-white/60 uppercase tracking-widest">{kit.marca || 'Sem Marca'}</span>
+                                    </div>
+                                    <div className="absolute top-3 right-3 bg-autro-primary px-2 py-0.5 rounded text-[10px] font-black text-white shadow-lg uppercase tracking-tighter">
+                                        {kit.modelo}
+                                    </div>
                                 </div>
-                                <Button onClick={() => handleAddToQuote(kit)} variant="secondary" size="sm" className="w-full mt-4">Adicionar ao Orçamento</Button>
+                                <div className="p-4 flex-grow flex flex-col bg-white">
+                                    <h4 className="font-black text-slate-900 text-base mb-1 line-clamp-2 uppercase tracking-tight">{kit.name}</h4>
+                                    <div className="flex items-center gap-2 mb-4">
+                                        <span className="text-[10px] font-mono text-slate-400 font-bold uppercase tracking-wider">SKU: {kit.sku}</span>
+                                        <span className="w-1 h-1 rounded-full bg-slate-300"></span>
+                                        <span className="text-[10px] font-bold text-slate-500 uppercase">{kit.ano}</span>
+                                    </div>
+                                    
+                                    <div className="space-y-2 mb-4">
+                                        <div className="flex justify-between items-end p-2 bg-slate-50 rounded-lg border border-slate-100">
+                                            <div>
+                                                <span className="text-[9px] font-black text-slate-400 uppercase block leading-none mb-1">Custo Produção</span>
+                                                <span className="font-bold text-slate-700 text-sm">{formatCurrency(details?.totalCost || 0)}</span>
+                                            </div>
+                                            <div className="text-right">
+                                                <span className="text-[9px] font-black text-slate-400 uppercase block leading-none mb-1">Preço Venda</span>
+                                                <span className="font-black text-autro-primary text-lg">{formatCurrency(details?.saleDetails?.sellingPrice || 0)}</span>
+                                            </div>
+                                        </div>
+                                        
+                                        <div className="flex justify-between items-center px-2">
+                                            <span className="text-[10px] font-bold text-slate-500 uppercase">Margem de Contribuição</span>
+                                            <div className="flex items-center gap-1">
+                                                <span className="text-xs font-black text-emerald-600">{formatCurrency(details?.saleDetails?.contributionMargin || 0)}</span>
+                                                <span className="text-[10px] font-bold text-emerald-500 bg-emerald-50 px-1.5 py-0.5 rounded">{(details?.saleDetails?.contributionMarginPercentage || 0).toFixed(1)}%</span>
+                                            </div>
+                                        </div>
+                                        {details?.keyName && (
+                                            <div className="flex justify-between items-center px-2 pt-1 border-t border-slate-100">
+                                                <span className="text-[10px] font-bold text-slate-500 uppercase">Chave Associada</span>
+                                                <span className="text-[10px] font-bold text-slate-600 truncate max-w-[120px]">{details.keyName}</span>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-2 mt-auto">
+                                        <Button 
+                                            onClick={() => handleAddToQuote(kit)} 
+                                            variant="primary" 
+                                            size="sm" 
+                                            className="h-10 text-[10px] uppercase font-black tracking-widest shadow-md hover:shadow-lg transition-all active:scale-95"
+                                        >
+                                            Adicionar
+                                        </Button>
+                                        <Button 
+                                            onClick={(e) => { 
+                                                e.stopPropagation(); 
+                                                setSaleDetailsModalData({ 
+                                                    kitName: kit.name, 
+                                                    cost: details?.totalCost || 0, 
+                                                    materialCost: details?.materialCost,
+                                                    fabricationCost: details?.fabricationCost,
+                                                    saleDetails: details?.saleDetails, 
+                                                    breakdown: details?.breakdown 
+                                                });
+                                            }}
+                                            variant="secondary" 
+                                            size="sm" 
+                                            className="h-10 text-[10px] uppercase font-black tracking-widest border-slate-200 hover:bg-slate-50 transition-all active:scale-95"
+                                        >
+                                            Detalhes
+                                        </Button>
+                                    </div>
+                                </div>
                             </Card>
                         )
                     })}
@@ -629,6 +851,7 @@ export const KitsByBrandView: React.FC<KitsByBrandViewProps> = ({ inventory, man
             totalAggregatedValue={totalAggregatedValue}
         />
       )}
+      {saleDetailsModalData && <SaleDetailsModal isOpen={!!saleDetailsModalData} onClose={() => setSaleDetailsModalData(null)} {...saleDetailsModalData} />}
     </div>
   );
 };

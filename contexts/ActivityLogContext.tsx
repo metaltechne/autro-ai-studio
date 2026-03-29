@@ -2,7 +2,7 @@
 import React, { createContext, useContext, useState, ReactNode, useCallback, useEffect } from 'react';
 import { ActivityLog, ActivityLogHook } from '../types';
 import { useAuth } from './AuthContext';
-import { nanoid } from 'https://esm.sh/nanoid@5.0.7';
+import { nanoid } from 'nanoid';
 import * as api from '../hooks/api';
 
 const ActivityLogContext = createContext<ActivityLogHook | undefined>(undefined);

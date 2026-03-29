@@ -11,7 +11,9 @@ import * as XLSX from 'xlsx';
 import { EmptyState } from './ui/EmptyState';
 import { PickingListModal } from './ui/PickingListModal';
 import { FinancialManagementModal } from './ui/FinancialManagementModal';
+import { ManufacturingOrderTrackingModal } from './ManufacturingOrderTrackingModal';
 import { useToast } from '../hooks/useToast';
+import { usePermissions } from '../hooks/usePermissions';
 import { getLogoBase64ForPdf } from '../data/assets';
 
 interface ManufacturingOrdersViewProps {
@@ -19,7 +21,10 @@ interface ManufacturingOrdersViewProps {
   inventory: InventoryHook;
 }
 
-const formatCurrency = (value: number) => value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const formatCurrency = (value: number | undefined | null) => {
+    if (value === undefined || value === null || isNaN(Number(value))) return 'R$ 0,00';
+    return Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+};
 
 const formatDateTime = (isoString: string) => {
     return new Date(isoString).toLocaleString('pt-BR', {
@@ -34,11 +39,13 @@ const formatDateTime = (isoString: string) => {
 export const ManufacturingOrdersView: React.FC<ManufacturingOrdersViewProps> = ({ manufacturingOrdersHook, inventory }) => {
     const { manufacturingOrders, updateManufacturingOrderStatus, updateManufacturingOrderInstallments, deleteManufacturingOrder } = manufacturingOrdersHook;
     const { addToast } = useToast();
+    const { canViewCosts } = usePermissions();
     
     const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
     const [confirmingAction, setConfirmingAction] = useState<{order: ManufacturingOrder, action: 'concluir' | 'cancelar'} | null>(null);
     const [pickingListOrder, setPickingListOrder] = useState<ManufacturingOrder | null>(null);
     const [editingFinancialsOrder, setEditingFinancialsOrder] = useState<ManufacturingOrder | null>(null);
+    const [trackingOrder, setTrackingOrder] = useState<ManufacturingOrder | null>(null);
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
     const [statusFilter, setStatusFilter] = useState<'all' | 'pendente' | 'concluída' | 'cancelada'>('all');
@@ -63,7 +70,7 @@ export const ManufacturingOrdersView: React.FC<ManufacturingOrdersViewProps> = (
         });
     }, [manufacturingOrders, startDate, endDate, statusFilter]);
 
-    const handleUpdateStatus = async (order: ManufacturingOrder, status: 'concluída' | 'cancelada') => {
+    const handleUpdateStatus = async (order: ManufacturingOrder, status: ManufacturingOrder['status']) => {
         setUpdatingOrderId(order.id);
         await updateManufacturingOrderStatus(order.id, status);
         setUpdatingOrderId(null);
@@ -103,15 +110,26 @@ export const ManufacturingOrdersView: React.FC<ManufacturingOrdersViewProps> = (
         doc.setDrawColor('#002B8A');
         doc.line(14, 28, 200, 28);
         
-        autoTable(doc, {
-            head: [['ID', 'Data', 'Status', 'Custo Total', 'Itens a Fabricar']],
-            body: filteredOrders.map(order => [
+        const head = canViewCosts 
+            ? [['ID', 'Data', 'Status', 'Custo Total', 'Itens a Fabricar']]
+            : [['ID', 'Data', 'Status', 'Itens a Fabricar']];
+
+        const body = filteredOrders.map(order => {
+            const row = [
                 order.id,
                 formatDateTime(order.createdAt),
                 order.status,
-                formatCurrency(order.analysis.totalCost),
-                order.orderItems.map(i => `${i.quantity}x ${inventory.findComponentById(i.componentId)?.name || i.componentId}`).join(', ')
-            ]),
+            ];
+            if (canViewCosts) {
+                row.push(formatCurrency(order.analysis.totalCost));
+            }
+            row.push(order.orderItems.map(i => `${i.quantity}x ${inventory.findComponentById(i.componentId)?.name || i.componentId}`).join(', '));
+            return row;
+        });
+
+        autoTable(doc, {
+            head,
+            body,
             startY: 35,
             theme: 'grid',
             headStyles: { fillColor: [0, 43, 138] },
@@ -133,15 +151,18 @@ export const ManufacturingOrdersView: React.FC<ManufacturingOrdersViewProps> = (
         const data = filteredOrders.flatMap(order => 
             order.orderItems.map(item => {
                 const component = inventory.findComponentById(item.componentId);
-                return {
+                const row: any = {
                     'ID da Ordem': order.id,
                     'Data': formatDateTime(order.createdAt),
                     'Status': order.status,
-                    'Custo Total (R$)': order.analysis.totalCost,
-                    'Quantidade a Fabricar': item.quantity,
-                    'Nome do Item': component?.name,
-                    'SKU do Item': component?.sku,
                 };
+                if (canViewCosts) {
+                    row['Custo Total (R$)'] = order.analysis.totalCost;
+                }
+                row['Quantidade a Fabricar'] = item.quantity;
+                row['Nome do Item'] = component?.name;
+                row['SKU do Item'] = component?.sku;
+                return row;
             })
         );
         const ws = XLSX.utils.json_to_sheet(data);
@@ -188,6 +209,7 @@ export const ManufacturingOrdersView: React.FC<ManufacturingOrdersViewProps> = (
                     <Select label="Status" value={statusFilter} onChange={e => setStatusFilter(e.target.value as any)}>
                         <option value="all">Todos</option>
                         <option value="pendente">Pendente</option>
+                        <option value="em_producao">Em Produção</option>
                         <option value="concluída">Concluída</option>
                         <option value="cancelada">Cancelada</option>
                     </Select>
@@ -211,6 +233,26 @@ export const ManufacturingOrdersView: React.FC<ManufacturingOrdersViewProps> = (
                                     <div>
                                         <h3 className="text-xl font-semibold text-black">Ordem de Fabricação - <span className="text-autro-blue">{order.id}</span></h3>
                                         <p className="text-sm text-gray-500">Criada em: {formatDateTime(order.createdAt)}</p>
+                                        <div className="flex gap-2 mt-1">
+                                            <span className="px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-700 capitalize">
+                                                {order.type || 'interna'}
+                                            </span>
+                                            {order.batchNumber && (
+                                                <span className="px-2 py-0.5 rounded text-xs font-medium bg-indigo-50 text-indigo-700">
+                                                    Lote: {order.batchNumber}
+                                                </span>
+                                            )}
+                                            {order.priority && (
+                                                <span className={`px-2 py-0.5 rounded text-xs font-medium capitalize ${
+                                                    order.priority === 'urgente' ? 'bg-red-100 text-red-800' :
+                                                    order.priority === 'alta' ? 'bg-orange-100 text-orange-800' :
+                                                    order.priority === 'baixa' ? 'bg-blue-100 text-blue-800' :
+                                                    'bg-slate-100 text-slate-800'
+                                                }`}>
+                                                    {order.priority}
+                                                </span>
+                                            )}
+                                        </div>
                                     </div>
                                     <div className="flex items-center gap-4 flex-shrink-0">
                                         <StatusBadge status={order.status} />
@@ -221,7 +263,31 @@ export const ManufacturingOrdersView: React.FC<ManufacturingOrdersViewProps> = (
                             
                             {isExpanded && (
                             <div className="p-4 border-t">
-                                <p className="text-sm text-gray-500 mb-4">Custo Total Estimado: <span className="text-black font-semibold">{formatCurrency(order.analysis.totalCost)}</span></p>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4 bg-slate-50 p-3 rounded-lg border border-slate-100">
+                                    <div>
+                                        <p className="text-[10px] font-bold text-slate-500 uppercase">Início</p>
+                                        <p className="text-sm font-medium text-slate-800">{order.startDate ? new Date(order.startDate).toLocaleDateString('pt-BR') : '-'}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-[10px] font-bold text-slate-500 uppercase">Previsão</p>
+                                        <p className="text-sm font-medium text-slate-800">{order.expectedDeliveryDate ? new Date(order.expectedDeliveryDate).toLocaleDateString('pt-BR') : '-'}</p>
+                                    </div>
+                                    {order.type === 'externa' && (
+                                        <div className="col-span-2">
+                                            <p className="text-[10px] font-bold text-slate-500 uppercase">Fornecedor</p>
+                                            <p className="text-sm font-medium text-slate-800">{order.supplierName || '-'}</p>
+                                        </div>
+                                    )}
+                                </div>
+                                {order.notes && (
+                                    <div className="mb-4">
+                                        <p className="text-[10px] font-bold text-slate-500 uppercase mb-1">Observações</p>
+                                        <p className="text-sm text-slate-700 bg-yellow-50 p-2 rounded border border-yellow-100 whitespace-pre-wrap">{order.notes}</p>
+                                    </div>
+                                )}
+                                {canViewCosts && (
+                                    <p className="text-sm text-gray-500 mb-4">Custo Total Estimado: <span className="text-black font-semibold">{formatCurrency(order.analysis.totalCost)}</span></p>
+                                )}
                                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                                     <div>
                                         <h4 className="text-md font-semibold text-black mb-2">Itens a Fabricar</h4>
@@ -244,9 +310,15 @@ export const ManufacturingOrdersView: React.FC<ManufacturingOrdersViewProps> = (
                                 
                                 <div className="mt-6 border-t pt-4 flex flex-wrap gap-2 justify-end">
                                     <Button onClick={(e) => { e.stopPropagation(); setDeletingOrder(order) }} variant="danger">Excluir</Button>
-                                    <Button onClick={(e) => { e.stopPropagation(); setEditingFinancialsOrder(order) }} variant="secondary">Financeiro</Button>
+                                    {canViewCosts && (
+                                        <Button onClick={(e) => { e.stopPropagation(); setEditingFinancialsOrder(order) }} variant="secondary">Financeiro</Button>
+                                    )}
+                                    <Button onClick={(e) => { e.stopPropagation(); setTrackingOrder(order) }} variant="secondary">Acompanhamento</Button>
                                     <Button onClick={(e) => { e.stopPropagation(); setPickingListOrder(order) }} disabled={!!updatingOrderId} variant="secondary">Lista de Separação</Button>
                                     {order.status === 'pendente' && (
+                                        <Button onClick={(e) => { e.stopPropagation(); handleUpdateStatus(order, 'em_producao') }} disabled={!!updatingOrderId} className="bg-blue-600 hover:bg-blue-500">Iniciar Produção</Button>
+                                    )}
+                                    {(order.status === 'pendente' || order.status === 'em_producao') && (
                                         <>
                                             <Button variant="danger" onClick={(e) => { e.stopPropagation(); setConfirmingAction({order, action: 'cancelar'}) }} disabled={!!updatingOrderId}>Cancelar Ordem</Button>
                                             <Button onClick={(e) => { e.stopPropagation(); setConfirmingAction({order, action: 'concluir'}) }} disabled={!!updatingOrderId}>Marcar como Concluída</Button>
@@ -301,6 +373,16 @@ export const ManufacturingOrdersView: React.FC<ManufacturingOrdersViewProps> = (
                     onClose={() => setPickingListOrder(null)}
                     order={pickingListOrder}
                     inventory={inventory}
+                />
+            )}
+
+            {trackingOrder && (
+                <ManufacturingOrderTrackingModal
+                    isOpen={!!trackingOrder}
+                    onClose={() => setTrackingOrder(null)}
+                    order={trackingOrder}
+                    inventory={inventory}
+                    onSave={manufacturingOrdersHook.updateManufacturingOrder}
                 />
             )}
 

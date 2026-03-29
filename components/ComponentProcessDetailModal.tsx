@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { Modal } from './ui/Modal';
 import { Button } from './ui/Button';
 import { Component, InventoryHook, ManufacturingHook } from '../types';
-import { evaluateProcess } from '../hooks/manufacturing-evaluator';
+import { evaluateProcess, parseFastenerSku } from '../hooks/manufacturing-evaluator';
 
 interface ComponentProcessDetailModalProps {
     isOpen: boolean;
@@ -13,8 +13,9 @@ interface ComponentProcessDetailModalProps {
     onEditProcess: (familiaId: string) => void;
 }
 
-const formatCurrency = (value: number) => {
-    return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const formatCurrency = (value: number | undefined | null) => {
+    if (value === undefined || value === null || isNaN(Number(value))) return 'R$ 0,00';
+    return Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
 const getNodeTypeLabel = (type: string | undefined): string => {
@@ -41,18 +42,32 @@ export const ComponentProcessDetailModal: React.FC<ComponentProcessDetailModalPr
         const familia = manufacturing.familias.find(f => f.id === component.familiaId);
         if (!familia) return null;
 
-        // Extract variables from SKU, e.g., "FIX-CODE-8x40" -> { bitola: 8, comprimento: 40 }
-        const skuParts = component.sku.split('-');
+        const fastenerData = parseFastenerSku(component.sku);
         const variables: Record<string, number> = {};
-        if (skuParts.length > 2) {
-            const dimParts = skuParts[skuParts.length - 1].split('x');
-            if (dimParts.length === 2) {
-                variables['bitola'] = Number(dimParts[0]);
-                variables['comprimento'] = Number(dimParts[1]);
+        const stringVariables: Record<string, string> = {};
+
+        if (fastenerData) {
+            variables['bitola'] = fastenerData.bitola;
+            variables['comprimento'] = fastenerData.comprimento;
+            stringVariables['headCode'] = fastenerData.head;
+        } else {
+            // Fallback for non-fastener SKUs or different formats
+            const skuParts = component.sku.split('-');
+            if (skuParts.length >= 2) {
+                const dimParts = skuParts[skuParts.length - 1].split('x');
+                if (dimParts.length === 2) {
+                    variables['bitola'] = Number(dimParts[0].replace(/\D/g, ''));
+                    variables['comprimento'] = Number(dimParts[1].replace(/\D/g, ''));
+                }
             }
         }
         
-        const result = evaluateProcess(familia, variables, inventory.components);
+        const result = evaluateProcess(familia, variables, inventory.components, stringVariables, {
+            workStations: manufacturing.workStations,
+            operations: manufacturing.standardOperations,
+            consumables: manufacturing.consumables,
+            allFamilias: manufacturing.familias
+        });
         
         // Filter for nodes that contribute to cost
         const costSteps = result.nodes.filter(node => 

@@ -21,7 +21,7 @@ export const ComponentUsageModal: React.FC<ComponentUsageModalProps> = ({ isOpen
             {kits.map(kit => (
               <li key={kit.id} className="p-3 bg-gray-50 rounded-md border">
                 <p className="font-semibold text-black">{kit.name}</p>
-                <p className="text-sm text-gray-500">{kit.marca} {kit.modelo} ({kit.ano}) - SKU: {kit.sku}</p>
+                <p className="text-sm text-gray-500">{kit.marca || 'Sem Marca'} {kit.modelo || 'N/A'} ({kit.ano || '??'}) - SKU: {kit.sku}</p>
               </li>
             ))}
           </ul>

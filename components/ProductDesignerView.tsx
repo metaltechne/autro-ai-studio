@@ -9,7 +9,7 @@ import { Modal } from './ui/Modal';
 // FIX: Imported missing UI helpers from CustomNodes to resolve ProductDesignerView build errors.
 import { DimensionTableUI, HeadCodeTableUI, ProductGeneratorFormUI } from './manufacturing/CustomNodes';
 import { useToast } from '../hooks/useToast';
-import { nanoid } from 'https://esm.sh/nanoid@5.0.7';
+import { nanoid } from 'nanoid';
 
 interface ProductDesignerViewProps {
     manufacturing: ManufacturingHook;
@@ -19,9 +19,9 @@ interface ProductDesignerViewProps {
 
 type Tab = 'config' | 'ingredients' | 'process' | 'result';
 
-const formatCurrency = (value: number) => {
-    if (typeof value !== 'number' || isNaN(value)) return 'R$ 0,00';
-    return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const formatCurrency = (value: number | undefined | null) => {
+    if (value === undefined || value === null || isNaN(Number(value))) return 'R$ 0,00';
+    return Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 };
 
 export const ProductDesignerView: React.FC<ProductDesignerViewProps> = ({ manufacturing, inventory, setCurrentView }) => {
@@ -38,7 +38,7 @@ export const ProductDesignerView: React.FC<ProductDesignerViewProps> = ({ manufa
 
     const filteredFamilias = useMemo(() => {
         if (!searchTerm) return familias;
-        return familias.filter(f => f.nome.toLowerCase().includes(searchTerm.toLowerCase()));
+        return familias.filter(f => (f.nome || '').toLowerCase().includes(searchTerm.toLowerCase()));
     }, [familias, searchTerm]);
 
     const findNodesByType = (type: string) => {
@@ -46,9 +46,9 @@ export const ProductDesignerView: React.FC<ProductDesignerViewProps> = ({ manufa
         return selectedFamilia.nodes.filter(n => n.data.type === type);
     };
 
-    const dimensionTableNode = findNodesByType('dimensionTable')[0] || findNodesByType('dnaTable')[0];
-    const headCodeTableNode = findNodesByType('headCodeTable')[0];
-    const generatorNode = findNodesByType('productGenerator')[0];
+    const dimensionTableNode = findNodesByType('dimensionTable')[0] || findNodesByType('dnaTable')[0] || findNodesByType('dnaTableNode')[0];
+    const headCodeTableNode = findNodesByType('headCodeTable')[0] || findNodesByType('codificationTable')[0] || findNodesByType('codificationTableNode')[0];
+    const generatorNode = findNodesByType('productGenerator')[0] || findNodesByType('productGeneratorNode')[0];
     
     const inputNodes = useMemo(() => {
         if (!selectedFamilia) return [];

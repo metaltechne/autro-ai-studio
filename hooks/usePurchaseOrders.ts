@@ -146,6 +146,20 @@ export const usePurchaseOrders = ({ addMultipleInventoryLogs, inventoryHook }: P
         await loadData();
     }, [addActivityLog, loadData]);
 
+    const updateMultiplePurchaseOrders = useCallback(async (ordersToUpdate: PurchaseOrder[]) => {
+        try {
+            const currentOrders = await api.getPurchaseOrders();
+            const updateMap = new Map(ordersToUpdate.map(o => [o.id, o]));
+            const newOrders = currentOrders.map(o => updateMap.get(o.id) || o);
+            await api.savePurchaseOrders(newOrders);
+            await addActivityLog(`Atualizou ${ordersToUpdate.length} ordens de compra via planilha.`);
+            await loadData();
+        } catch (e) {
+            console.error("Failed to batch update purchase orders:", e);
+            throw e;
+        }
+    }, [addActivityLog, loadData]);
+
     const deletePurchaseOrder = useCallback(async (orderId: string) => {
         const currentOrders = await api.getPurchaseOrders();
         const orderToDelete = currentOrders.find(o => o.id === orderId);
@@ -164,6 +178,7 @@ export const usePurchaseOrders = ({ addMultipleInventoryLogs, inventoryHook }: P
         addPurchaseOrder,
         savePurchaseOrder,
         updateOrderStatus,
+        updateMultiplePurchaseOrders,
         updatePurchaseOrderInstallments,
         deletePurchaseOrder,
     };

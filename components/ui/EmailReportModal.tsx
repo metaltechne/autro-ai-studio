@@ -18,7 +18,10 @@ interface EmailReportModalProps {
   totalAggregatedValue: number;
 }
 
-const formatCurrency = (value: number) => value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const formatCurrency = (value: number | undefined | null) => {
+    if (value === undefined || value === null || isNaN(Number(value))) return 'R$ 0,00';
+    return Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+};
 
 // Function to generate the email body text
 const generateEmailBody = (summary: EmailReportModalProps['selectionSummary'], parts: AggregatedPart[], totalValue: number): string => {

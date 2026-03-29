@@ -16,6 +16,7 @@ export enum View {
     PURCHASE_ORDERS = 'PURCHASE_ORDERS',
     MANUFACTURING_PLANNER = 'MANUFACTURING_PLANNER',
     MANUFACTURING_ORDERS = 'MANUFACTURING_ORDERS',
+    MANUFACTURING_CALENDAR = 'MANUFACTURING_CALENDAR',
     PRODUCTION_FINANCIAL_FLOW = 'PRODUCTION_FINANCIAL_FLOW',
     INVENTORY_ANALYSIS = 'INVENTORY_ANALYSIS',
     PURCHASE_PRODUCTION_PLANNING = 'PURCHASE_PRODUCTION_PLANNING',
@@ -34,10 +35,14 @@ export enum View {
     USER_MANAGEMENT = 'USER_MANAGEMENT',
     SALES_ORDER_IMPORT = 'SALES_ORDER_IMPORT',
     PRICING_SIMULATOR = 'PRICING_SIMULATOR',
-    CUSTOMERS = 'CUSTOMERS'
+    CUSTOMERS = 'CUSTOMERS',
+    MANUFACTURING_STRUCTURE = 'MANUFACTURING_STRUCTURE',
+    MANUFACTURING_DASHBOARD = 'MANUFACTURING_DASHBOARD',
+    MACHINE_DASHBOARD = 'MACHINE_DASHBOARD',
+    MANUFACTURING_CONTROL_CENTER = 'MANUFACTURING_CONTROL_CENTER'
 }
 
-export type UserRole = 'Admin' | 'Gerente' | 'Vendedor' | 'Operador';
+export type UserRole = 'Admin' | 'Gestor' | 'Vendedor' | 'Linha de Produção' | 'Fabricação' | 'Compras' | 'Financeiro';
 
 export interface UserProfile {
     uid: string;
@@ -51,10 +56,14 @@ export interface Component {
     sku: string;
     type: 'component' | 'raw_material';
     stock: number;
+    reservedStock?: number;
     familiaId?: string;
     sourcing?: 'manufactured' | 'purchased' | 'beneficiado' | 'semi_finished';
     custoFabricacao: number;
     custoMateriaPrima: number;
+    materialCost?: number;
+    fabricationCost?: number;
+    cost?: number;
     purchaseCost?: number;
     purchaseUnit?: string;
     purchaseQuantity?: number;
@@ -81,6 +90,8 @@ export interface Kit {
     requiredFasteners: { dimension: string; quantity: number }[];
     sellingPriceOverride?: number;
     pricingStrategy?: 'markup' | 'override';
+    selectedKeyId?: string;
+    selectedFamiliaId?: string;
 }
 
 export interface InventoryLog {
@@ -125,9 +136,13 @@ export interface ProcessDimension {
     comprimento: number;
     diametro?: number;
     baseMaterialId?: string;
+    bodyPieceMaterialId?: string;
     targetFamiliaId?: string;
+    headMachiningCost?: number;
+    bodyPieceCost?: number;
     consumption?: number;
     serviceCost?: number;
+    code?: string;
 }
 
 export interface GenerationConfig {
@@ -145,6 +160,7 @@ export interface WorkStation {
     id: string;
     name: string;
     hourlyRate: number;
+    capacityHoursPerDay?: number;
 }
 
 export interface Consumable {
@@ -170,20 +186,26 @@ export interface StandardOperation {
 export interface FamiliaComponente {
     id: string;
     nome: string;
+    type?: string;
     sourcing: Component['sourcing'];
     category: ProcessCategory;
     nodes: Node<ProcessNodeData>[];
     edges: Edge[];
 }
 
+export type CostCalculationMode = 'fixed' | 'time' | 'workstation';
+
 export interface ProcessNodeData {
     label: string;
     cost: number;
-    type: 'etapaFabricacao' | 'materiaPrima' | 'inventoryComponent' | 'processVariable' | 'headCodeTable' | 'dimensionTable' | 'productGenerator' | 'finalProduct' | 'externalDataSource' | 'dnaTable' | 'materialMapping' | 'codificationTable' | 'serviceMapping' | 'subProcessMapping';
+    costCalculationMode?: CostCalculationMode;
+    fixedCost?: number;
+    type: 'etapaFabricacao' | 'materiaPrima' | 'inventoryComponent' | 'processVariable' | 'headCodeTable' | 'dimensionTable' | 'productGenerator' | 'finalProduct' | 'externalDataSource' | 'dnaTable' | 'materialMapping' | 'codificationTable' | 'serviceMapping' | 'subProcessMapping' | 'usinagemParafusoSextavado' | 'dnaTableNode' | 'productGeneratorNode' | 'codificationTableNode' | 'etapaFabricacaoNode' | 'materialMappingNode';
     baseMaterialId?: string;
     consumption?: number;
     componentId?: string;
     componentIdTemplate?: string;
+    sourceFamiliaId?: string;
     headCodes?: ProcessHeadCode[];
     dimensions?: ProcessDimension[];
     generationConfig?: GenerationConfig;
@@ -192,6 +214,7 @@ export interface ProcessNodeData {
     tableMode?: 'fastener' | 'standard';
     mappingMode?: 'thread' | 'diameter';
     operationId?: string; 
+    workStationId?: string;
     isExternalService?: boolean; 
     externalServiceCost?: number; 
     manualTimeSeconds?: number;
@@ -209,8 +232,9 @@ export interface ProcessNodeData {
     updateNodeMappingMode?: (mode: 'thread' | 'diameter') => void;
     updateNodeOperationDetails?: (details: { 
         operationId?: string; 
-        isExternalService?: boolean;
-        externalServiceCost?: number;
+        costCalculationMode?: CostCalculationMode;
+        fixedCost?: number;
+        workStationId?: string;
         manualTimeSeconds?: number; 
         manualOperatorId?: string; 
         manualConsumables?: OperationConsumable[];
@@ -246,6 +270,8 @@ export interface ProductionOrder {
     orderItems: ProductionOrderItem[];
     selectedScenario: ProductionScenario;
     virtualComponents: Component[];
+    actualCost?: number;
+    actualTimeSeconds?: number;
     notes?: string;
     customerId?: string;
     scannedItems: Record<string, number>;
@@ -327,6 +353,7 @@ export interface ProductionOrderItem {
     kitId: string;
     quantity: number;
     fastenerHeadCode?: string;
+    variant?: 'Padrão' | 'Fix-S' | 'Fix-P';
 }
 
 export interface ScannedQRCodeData {
@@ -337,6 +364,7 @@ export interface ScannedQRCodeData {
 export interface QuoteItem {
     kit: Kit;
     quantity: number;
+    variant?: 'Padrão' | 'Fix-S' | 'Fix-P';
 }
 
 export interface PurchaseRecommendation {
@@ -383,6 +411,8 @@ export interface RawMaterialForecastItem {
 export interface ManufacturingOrderItem {
     componentId: string;
     quantity: number;
+    name?: string;
+    sku?: string;
 }
 
 export interface ManufacturingAnalysis {
@@ -390,26 +420,55 @@ export interface ManufacturingAnalysis {
     totalCost: number;
     requirements: AggregatedManufacturingRequirement[];
     detailedBreakdown?: CostStep[];
+    manufacturingSteps?: CostStep[];
 }
 
 export interface AggregatedManufacturingRequirement {
     id: string;
     name: string;
-    type: 'materiaPrima' | 'etapaFabricacao' | 'inventoryComponent';
+    type: 'materiaPrima' | 'etapaFabricacao' | 'inventoryComponent' | string;
     quantity: number;
     unit: string;
     stock: number;
     shortage: number;
+    familiaId?: string;
+}
+
+export interface ManufacturingTrackingStep {
+    id: string;
+    name: string;
+    status: 'pendente' | 'em_andamento' | 'concluido' | 'bloqueado';
+    predictedCost: number;
+    actualCost?: number;
+    predictedTimeSeconds?: number;
+    actualTimeSeconds?: number;
+    quantity?: number;
+    producedQuantity?: number;
+    startDate?: string;
+    endDate?: string;
+    assignedTo?: string; // Operator or Machine
+    blockedReason?: string; // Reason for blockage (Andon)
+    generatedInputs?: { id: string; name: string; quantity: number }[];
 }
 
 export interface ManufacturingOrder {
     id: string;
     createdAt: string;
     status: 'pendente' | 'em_producao' | 'concluída' | 'cancelada';
+    priority?: 'baixa' | 'normal' | 'alta' | 'urgente';
+    type?: 'interna' | 'externa';
+    startDate?: string;
+    expectedDeliveryDate?: string;
+    batchNumber?: string;
+    supplierName?: string;
+    notes?: string;
     orderItems: ManufacturingOrderItem[];
     analysis: ManufacturingAnalysis;
     predictedCost: number;
+    actualCost?: number;
+    actualTimeSeconds?: number;
     installments: Installment[];
+    trackingSteps?: ManufacturingTrackingStep[];
 }
 
 export interface PurchaseOrder {
@@ -574,22 +633,39 @@ export interface KitCostBreakdownItem {
     quantity: number;
     unitCost: number;
     totalCost: number;
-    type: 'Componente' | 'Fixador';
+    type: 'Componente' | 'Fixador' | 'Chave';
     familiaId?: string;
     familiaName?: string;
+    costBreakdown?: CostStep[];
 }
 
 export interface KitCostDetails {
     totalCost: number;
+    materialCost: number;
+    fabricationCost: number;
     breakdown: KitCostBreakdownItem[];
     saleDetails: SaleDetails;
+    keyName?: string;
+    options?: {
+        [key: string]: {
+            totalCost: number;
+            materialCost: number;
+            fabricationCost: number;
+            saleDetails: SaleDetails;
+            keyName?: string;
+            breakdown: KitCostBreakdownItem[];
+        }
+    };
 }
 
 export interface CostStep {
     id?: string;
+    nodeId?: string;
     name: string;
     type: string;
     cost: number;
+    timeSeconds?: number;
+    quantity?: number;
     details?: string;
 }
 
@@ -600,6 +676,7 @@ export interface GeneratedProduct {
     custoFabricacao: number;
     costBreakdown: CostStep[];
     defaultSourcing: Component['sourcing'];
+    familiaId: string;
 }
 
 export interface Toast {
@@ -769,10 +846,12 @@ export interface ProductionOrdersHook {
     isLoading: boolean;
     addProductionOrder: (data: Omit<ProductionOrder, 'id' | 'createdAt' | 'status'>) => Promise<string | null>;
     updateProductionOrderStatus: (orderId: string, status: ProductionOrder['status']) => Promise<void>;
+    updateMultipleProductionOrders: (ordersToUpdate: ProductionOrder[]) => Promise<void>;
     updateScannedItems: (orderId: string, scannedItems: Record<string, number>) => Promise<void>;
     updateOrderFulfillment: (orderId: string, updates: { scannedItems: Record<string, number>; substitutions: Record<string, { substitutedWithId: string; quantity: number; }> }) => Promise<void>;
     deleteProductionOrder: (orderId: string) => Promise<void>;
     updateProductionOrderInstallments: (orderId: string, installments: Installment[]) => Promise<void>;
+    updateProductionOrderTracking: (orderId: string, tracking: { actualCost?: number; actualTimeSeconds?: number }) => Promise<void>;
 }
 
 export interface PurchaseOrdersHook {
@@ -781,6 +860,7 @@ export interface PurchaseOrdersHook {
     addPurchaseOrder: (recommendations: PurchaseRecommendation[], expectedDeliveryDate: string) => Promise<string | null>;
     savePurchaseOrder: (order: PurchaseOrder) => Promise<void>;
     updateOrderStatus: (orderId: string, status: PurchaseOrder['status']) => Promise<void>;
+    updateMultiplePurchaseOrders: (ordersToUpdate: PurchaseOrder[]) => Promise<void>;
     updatePurchaseOrderInstallments: (orderId: string, installments: Installment[]) => Promise<void>;
     deletePurchaseOrder: (orderId: string) => Promise<void>;
 }
@@ -790,7 +870,11 @@ export interface ManufacturingOrdersHook {
     isLoading: boolean;
     addManufacturingOrder: (orderItems: ManufacturingOrderItem[], analysis: ManufacturingAnalysis) => Promise<string | null>;
     updateManufacturingOrderStatus: (orderId: string, status: ManufacturingOrder['status']) => Promise<void>;
+    updateMultipleManufacturingOrders: (ordersToUpdate: ManufacturingOrder[]) => Promise<void>;
     updateManufacturingOrderInstallments: (orderId: string, installments: Installment[]) => Promise<void>;
+    updateManufacturingOrderAnalysis: (orderId: string, analysis: ManufacturingAnalysis) => Promise<void>;
+    updateManufacturingOrderTracking: (orderId: string, tracking: { actualCost?: number; actualTimeSeconds?: number }) => Promise<void>;
+    updateManufacturingOrder: (orderId: string, updates: Partial<ManufacturingOrder>) => Promise<void>;
     deleteManufacturingOrder: (orderId: string) => Promise<void>;
 }
 
@@ -802,6 +886,7 @@ export interface CuttingOrdersHook {
     finishCuttingOrder: (orderId: string, scannedTargetId: string) => Promise<boolean>;
     addMultipleCuttingOrders: (recommendations: CuttingRecommendation[]) => Promise<void>;
     updateCuttingOrder: (orderId: string, updates: Partial<Pick<CuttingOrder, 'quantity'>>) => Promise<void>;
+    updateMultipleCuttingOrders: (ordersToUpdate: CuttingOrder[]) => Promise<void>;
     deleteCuttingOrder: (orderId: string) => Promise<void>;
 }
 
@@ -853,6 +938,7 @@ export interface CustomersHook {
     isLoading: boolean;
     addCustomer: (customerData: Omit<Customer, 'id' | 'createdAt'>) => Promise<Customer | null>;
     updateCustomer: (updatedCustomer: Customer) => Promise<void>;
+    updateMultipleCustomers: (customersToUpdate: Customer[]) => Promise<void>;
     deleteCustomer: (customerId: string) => Promise<void>;
     findCustomerById: (id: string) => Customer | undefined;
 }

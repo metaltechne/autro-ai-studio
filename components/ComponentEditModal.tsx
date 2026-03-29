@@ -27,8 +27,12 @@ export const ComponentEditModal: React.FC<ComponentEditModalProps> = ({ isOpen, 
         setIsSaving(false);
     }, [isOpen, componentToEdit]);
 
-    const processControlledFamiliaIds = useMemo(() => new Set(familias.filter(f => f.nodes?.some(n => n.data.type === 'productGenerator')).map(f => f.id)), [familias]);
+    const processControlledFamiliaIds = useMemo(() => new Set(familias.filter(f => f.nodes?.some(n => n.data.type === 'productGenerator' || n.data.type === 'productGeneratorNode')).map(f => f.id)), [familias]);
     const familiaMap = useMemo(() => new Map(familias.map(f => [f.id, f])), [familias]);
+
+    const availableFamilias = useMemo(() => {
+        return familias.filter(f => !processControlledFamiliaIds.has(f.id) || f.id === data.familiaId);
+    }, [familias, processControlledFamiliaIds, data.familiaId]);
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
         const { name, value, type } = e.target;
@@ -66,7 +70,7 @@ export const ComponentEditModal: React.FC<ComponentEditModalProps> = ({ isOpen, 
                 <Input label="SKU" name="sku" value={data.sku || ''} onChange={handleChange} />
                 <Select label="Família de Produto (Processo)" name="familiaId" value={data.familiaId || ''} onChange={handleChange}>
                     <option value="" disabled>Selecione uma família...</option>
-                    {familias.filter(f => !processControlledFamiliaIds.has(f.id)).map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
+                    {availableFamilias.map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
                 </Select>
                 <Select label="Origem" name="sourcing" value={data.sourcing || 'manufactured'} onChange={handleChange}>
                     <option value="manufactured">Fabricado</option>

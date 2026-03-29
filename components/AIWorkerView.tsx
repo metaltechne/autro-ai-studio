@@ -13,7 +13,10 @@ interface Message {
     action?: AIAction;
 }
 
-const formatCurrency = (value: number) => value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const formatCurrency = (value: number | undefined | null) => {
+    if (value === undefined || value === null || isNaN(Number(value))) return 'R$ 0,00';
+    return Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+};
 
 export const AIWorkerView: React.FC<AIWorkerViewProps> = ({ inventory, manufacturing, productionOrdersHook, plannerHook }) => {
     const [messages, setMessages] = useState<Message[]>([]);
@@ -159,8 +162,8 @@ ${familiaOptions}
         procurarComponentes: ({ termo }: { termo: string }): string => {
             const lowerTermo = termo.toLowerCase();
             const results = components.filter(c => 
-                c.name.toLowerCase().includes(lowerTermo) || 
-                c.sku.toLowerCase().includes(lowerTermo)
+                (c.name || '').toLowerCase().includes(lowerTermo) || 
+                (c.sku || '').toLowerCase().includes(lowerTermo)
             );
             if (results.length === 0) return `Nenhum componente encontrado para o termo "${termo}".`;
             return "Resultados encontrados:\n" + results.map(c => `- ${c.name} (SKU: ${c.sku}) | Estoque: ${c.stock}`).join('\n');
@@ -173,7 +176,7 @@ ${familiaOptions}
             const aggregated = new Map<string, { name: string, quantity: number }>();
             
             kitsDaMarca.forEach(kit => {
-                if (tipoComponente.toLowerCase().includes('fixador')) {
+                if ((tipoComponente || '').toLowerCase().includes('fixador')) {
                     kit.requiredFasteners.forEach(f => {
                         const name = `Fixador ${f.dimension}`;
                         const existing = aggregated.get(name) || { name, quantity: 0 };

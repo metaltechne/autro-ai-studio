@@ -22,7 +22,10 @@ import { useToast } from '../hooks/useToast';
 const ITEMS_PER_PAGE = 25;
 const LOW_STOCK_THRESHOLD = 10;
 
-const formatCurrency = (value: number) => value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const formatCurrency = (value: number | undefined | null) => {
+    if (value === undefined || value === null || isNaN(Number(value))) return 'R$ 0,00';
+    return Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+};
 
 export const ComponentsView: React.FC<ComponentsViewProps> = ({ inventory, manufacturing, setCurrentView, onShowQRCode, initialFilter, onClearFilter }) => {
     const { components, addComponent, updateComponent, deleteComponent, addInventoryLog, getLogsForComponent, getKitsUsingComponent, recalculateAllComponentCosts } = inventory;
@@ -59,7 +62,7 @@ export const ComponentsView: React.FC<ComponentsViewProps> = ({ inventory, manuf
 
         if (searchTerm) {
             const lower = searchTerm.toLowerCase();
-            results = results.filter(c => c.name.toLowerCase().includes(lower) || c.sku.toLowerCase().includes(lower));
+            results = results.filter(c => (c.name || '').toLowerCase().includes(lower) || (c.sku || '').toLowerCase().includes(lower));
         }
         
         return results.sort((a,b) => a.name.localeCompare(b.name));
@@ -94,6 +97,16 @@ export const ComponentsView: React.FC<ComponentsViewProps> = ({ inventory, manuf
                     <p className="text-slate-500 font-medium">Gestão tática de itens processados e acabados.</p>
                 </div>
                 <div className="flex items-center gap-2">
+                    <Button 
+                        onClick={async () => {
+                            await recalculateAllComponentCosts();
+                            addToast('Todos os custos de componentes foram recalculados.', 'success');
+                        }} 
+                        variant="secondary" 
+                        className="h-11 border-slate-200 text-slate-600 hover:bg-slate-50"
+                    >
+                        Recalcular Custos
+                    </Button>
                     <div className="bg-slate-100 p-1 rounded-xl flex border border-slate-200">
                         <button onClick={() => setViewMode('list')} className={`p-2 rounded-lg transition-all ${viewMode === 'list' ? 'bg-white shadow-sm text-autro-primary' : 'text-slate-400'}`}>
                             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path d="M4 6h16M4 12h16M4 18h16" /></svg>
@@ -143,7 +156,7 @@ export const ComponentsView: React.FC<ComponentsViewProps> = ({ inventory, manuf
                             <Card key={c.id} className={`flex flex-col h-full border-t-4 ${isProcessControlled ? 'border-t-purple-500' : 'border-t-slate-900'}`}>
                                 <div className="flex justify-between items-start mb-4">
                                     <div className="min-w-0 flex-grow">
-                                        <h4 className="font-black text-slate-900 leading-tight truncate uppercase tracking-tighter" title={c.name}>{c.name}</h4>
+                                        <h4 className="font-black text-slate-900 leading-tight line-clamp-2 uppercase tracking-tighter" title={c.name}>{c.name}</h4>
                                         <p className="text-[10px] font-mono text-slate-400 uppercase font-bold">{c.sku}</p>
                                     </div>
                                     <StatusBadge stock={c.stock} />

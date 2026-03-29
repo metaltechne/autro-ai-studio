@@ -22,12 +22,17 @@ const NavItem: React.FC<{
     return (
         <button
             onClick={onClick}
-            className={`flex flex-col items-center justify-center w-full h-full text-xs transition-colors duration-200 ${
-                isActive ? 'text-autro-blue' : 'text-gray-500 hover:text-autro-blue'
+            className={`flex flex-col items-center justify-center w-full h-full text-[10px] font-black uppercase tracking-widest transition-all duration-300 relative ${
+                isActive ? 'text-autro-primary' : 'text-slate-400 hover:text-slate-600'
             }`}
         >
-            {icon}
-            <span className="mt-1">{label}</span>
+            <div className={`p-2 rounded-xl transition-all duration-300 mb-1 ${isActive ? 'bg-autro-primary/10 scale-110 shadow-soft' : ''}`}>
+                {React.cloneElement(icon as React.ReactElement, { className: 'h-5 w-5' })}
+            </div>
+            <span className={`transition-all duration-300 ${isActive ? 'opacity-100 scale-105' : 'opacity-70'}`}>{label}</span>
+            {isActive && (
+                <div className="absolute bottom-[-12px] w-8 h-1 bg-autro-primary rounded-t-full shadow-[0_0_10px_rgba(59,130,246,0.5)]" />
+            )}
         </button>
     );
 };
@@ -41,14 +46,14 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({ currentView, setCurr
     const isOneOfMainViews = mainViews.includes(currentView);
     
     const navItems = [
-        { view: View.SECTOR_DASHBOARD, label: "Dashboard", icon: <DashboardIcon /> },
-        { view: View.STOCK_MOVEMENT, label: "Movimentar", icon: <StockMovementIcon /> },
+        { view: View.SECTOR_DASHBOARD, label: "Início", icon: <DashboardIcon /> },
+        { view: View.STOCK_MOVEMENT, label: "Estoque", icon: <StockMovementIcon /> },
         { view: View.ORDER_VERIFICATION, label: "Conferir", icon: <OrderVerificationIcon /> },
     ];
 
     return (
-        <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-40 print-hide">
-            <div className="flex justify-around h-16">
+        <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-lg border-t border-slate-200/60 z-40 print-hide shadow-[0_-10px_15px_-3px_rgba(0,0,0,0.05)] h-20 pb-safe">
+            <div className="flex justify-around h-full items-center px-4">
                 {navItems.map(item => (
                     <NavItem
                         key={item.view}

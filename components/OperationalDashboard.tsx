@@ -3,7 +3,7 @@ import { InventoryHook, ManufacturingHook, View, ManufacturingOrdersHook, Purcha
 import { Card } from './ui/Card';
 import { Button } from './ui/Button';
 import { useToast } from '../hooks/useToast';
-import { nanoid } from 'https://esm.sh/nanoid@5.0.7';
+import { nanoid } from 'nanoid';
 import { Widget } from './Widget';
 import { WidgetConfigModal } from './WidgetConfigModal';
 import { Modal } from './ui/Modal';
@@ -19,6 +19,7 @@ interface OperationalDashboardProps {
   setComponentFilter: (filter: { type: 'low-stock' } | null) => void;
   promotionalCampaigns: PromotionalCampaign[];
   isMobile: boolean;
+  setIsOperatorModeOpen: (open: boolean) => void;
 }
 
 const professionalDefaultWidgets: DashboardWidget[] = [
@@ -42,7 +43,7 @@ const WIDGET_LIBRARY: { name: string, type: DashboardWidget['type'], defaultCofi
 
 
 export const OperationalDashboard: React.FC<OperationalDashboardProps> = (props) => {
-  const { isMobile, promotionalCampaigns, setCurrentView } = props;
+  const { isMobile, promotionalCampaigns, setCurrentView, setIsOperatorModeOpen } = props;
   const { addToast } = useToast();
   const [isEditMode, setIsEditMode] = useState(false);
   const [widgets, setWidgets] = useState<DashboardWidget[]>([]);
@@ -152,6 +153,7 @@ export const OperationalDashboard: React.FC<OperationalDashboardProps> = (props)
       <div className="flex justify-between items-center">
         <h2 className="text-3xl font-bold text-black">Visão Geral Operacional</h2>
         <div className="flex gap-2">
+            <Button onClick={() => setIsOperatorModeOpen(true)} variant="primary" className="bg-red-600 hover:bg-red-700">Modo Operador</Button>
             <Button onClick={() => setCurrentView(View.SALES_ORDER_IMPORT)} variant="secondary">Importar Pedido (CSV)</Button>
             {isEditMode && <Button onClick={() => setIsAddModalOpen(true)} variant="primary">Adicionar Widget</Button>}
             <Button onClick={() => { setIsEditMode(!isEditMode); if(isEditMode) addToast("Layout salvo!", "success"); }} variant="secondary">

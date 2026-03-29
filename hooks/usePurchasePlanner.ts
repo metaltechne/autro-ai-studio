@@ -82,7 +82,7 @@ export const usePurchasePlanner = (
     const cuttingCost = useMemo(() => {
         const cuttingFamilia = familias.find(f => f.id === 'fam-corte-fixador');
         if (!cuttingFamilia) return Infinity; // A high cost if process doesn't exist
-        const result = evaluateProcess(cuttingFamilia, {}, components);
+        const result = evaluateProcess(cuttingFamilia, {}, components, {}, { allFamilias: familias });
         return result.custoFabricacao + result.custoMateriaPrima;
     }, [familias, components]);
 
@@ -207,7 +207,7 @@ export const usePurchasePlanner = (
                     const variables = skuInfo ? { bitola: skuInfo.bitola, comprimento: skuInfo.comprimento } : {};
                     const stringVariables = skuInfo ? { headCode: skuInfo.head } : {};
 
-                    const analysis = evaluateProcess(familia, variables, components, stringVariables);
+                    const analysis = evaluateProcess(familia, variables, components, stringVariables, { allFamilias: familias });
                     
                     for (const node of analysis.nodes) {
                         if ((node.data.type === 'materiaPrima' || node.data.type === 'inventoryComponent') && node.data.cost > 0) {
@@ -255,7 +255,7 @@ export const usePurchasePlanner = (
              const variables = skuInfo ? { bitola: skuInfo.bitola, comprimento: skuInfo.comprimento } : {};
              const stringVariables = skuInfo ? { headCode: skuInfo.head } : {};
 
-             const analysis = evaluateProcess(familia, variables, components, stringVariables);
+             const analysis = evaluateProcess(familia, variables, components, stringVariables, { allFamilias: familias });
              
              for (const node of analysis.nodes) {
                  if (node.data.type === 'materiaPrima' && node.data.baseMaterialId) {

@@ -21,9 +21,9 @@ interface PurchaseOrdersViewProps {
   inventory: InventoryHook;
 }
 
-const formatCurrency = (value: number | undefined) => {
-    if (typeof value !== 'number') return 'R$ 0,00';
-    return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const formatCurrency = (value: number | undefined | null) => {
+    if (value === undefined || value === null || isNaN(Number(value))) return 'R$ 0,00';
+    return Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 };
 
 const formatDateTime = (isoString: string) => {

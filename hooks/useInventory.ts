@@ -1,8 +1,8 @@
 
 import { useState, useCallback, useMemo, useEffect } from 'react';
-import { Component, Kit, ProductionScenario, InventoryHook, FamiliaComponente, InventoryLog, ProductionOrderItem, SyncReport, ComponentImportData, ProcessDimension, StockAdjustmentImportData, KitImportData, KitComponent, SubstitutionOption, ProductionScenarioShortage, ProductionOrder, FinancialSettings } from '../types';
+import { Component, Kit, ProductionScenario, InventoryHook, FamiliaComponente, InventoryLog, ProductionOrderItem, SyncReport, ComponentImportData, ProcessDimension, StockAdjustmentImportData, KitImportData, KitComponent, SubstitutionOption, ProductionScenarioShortage, ProductionOrder, ManufacturingOrder, FinancialSettings } from '../types';
 import { evaluateProcess, generateAllProductsForFamilia, getComponentCost, parseFastenerSku } from './manufacturing-evaluator';
-import { nanoid } from 'https://esm.sh/nanoid@5.0.7';
+import { nanoid } from 'nanoid';
 import * as api from './api';
 import { useToast } from './useToast';
 import { useActivityLog } from '../contexts/ActivityLogContext';
@@ -15,27 +15,48 @@ export const useInventory = (): InventoryHook => {
   const { addToast } = useToast();
   const { addActivityLog } = useActivityLog();
 
-  const calculateAllStock = useCallback((allComponents: Component[], allLogs: InventoryLog[]): Component[] => {
+  const calculateAllStock = useCallback((allComponents: Component[], allLogs: InventoryLog[], prodOrders: ProductionOrder[], manOrders: ManufacturingOrder[]): Component[] => {
     const stockMap = new Map<string, number>();
+    const reservedMap = new Map<string, number>();
+
     allLogs.forEach(log => {
         const currentStock = stockMap.get(log.componentId) || 0;
         const change = log.type === 'entrada' ? log.quantity : -log.quantity;
         stockMap.set(log.componentId, currentStock + change);
     });
 
+    // Calcular Reservas de Ordens de Produção (Kits)
+    prodOrders.filter(o => o.status === 'pendente' || o.status === 'em_montagem').forEach(order => {
+        (order.selectedScenario.detailedRequirements || []).forEach(req => {
+            const currentReserved = reservedMap.get(req.componentId) || 0;
+            reservedMap.set(req.componentId, currentReserved + req.required);
+        });
+    });
+
+    // Calcular Reservas de Ordens de Fabricação (Componentes)
+    manOrders.filter(o => o.status === 'pendente' || o.status === 'em_producao').forEach(order => {
+        (order.analysis.requirements || []).forEach(req => {
+            const currentReserved = reservedMap.get(req.id) || 0;
+            reservedMap.set(req.id, currentReserved + req.quantity);
+        });
+    });
+
     return allComponents.map(c => ({
         ...c,
         stock: stockMap.get(c.id) || 0,
+        reservedStock: reservedMap.get(c.id) || 0,
     }));
   }, []);
 
   const loadData = useCallback(async () => {
     setIsLoading(true);
     try {
-        const [componentsData, kitsData, logsData] = await Promise.all([
+        const [componentsData, kitsData, logsData, prodOrders, manOrders] = await Promise.all([
             api.getComponents(),
             api.getKits(),
-            api.getInventoryLogs()
+            api.getInventoryLogs(),
+            api.getProductionOrders(),
+            api.getManufacturingOrders()
         ]);
 
         const sanitizedKits = (kitsData || []).map(kit => ({
@@ -49,7 +70,7 @@ export const useInventory = (): InventoryHook => {
         setInventoryLogs(logs);
 
         const rawComponents = componentsData || [];
-        const componentsWithStock = calculateAllStock(rawComponents, logs);
+        const componentsWithStock = calculateAllStock(rawComponents, logs, prodOrders, manOrders);
         setComponents(componentsWithStock);
     } catch (error) {
         console.error("Failed to load inventory data:", error);
@@ -352,7 +373,7 @@ export const useInventory = (): InventoryHook => {
       }
   }, [addToast, addActivityLog, loadData]);
 
-  const addMultipleKits = useCallback(async (kitsToImport: KitImportData[]): Promise<{ successCount: number, errorCount: number }> => {
+  const addMultipleKits = useCallback(async (kitsToImport: Kit[]): Promise<{ successCount: number, errorCount: number }> => {
       try {
           const currentKits = await api.getKits();
           const currentKitSkus = new Set(currentKits.map(k => k.sku.toLowerCase()));
@@ -360,24 +381,11 @@ export const useInventory = (): InventoryHook => {
           let errorCount = 0;
 
           for (const item of kitsToImport) {
-              if (currentKitSkus.has(item.SKU.toLowerCase())) {
+              if (currentKitSkus.has(item.sku.toLowerCase())) {
                   errorCount++;
                   continue;
               }
-              
-              const newKit: Kit = {
-                  id: `kit-${item.SKU}`,
-                  name: item['Nome do Kit'],
-                  sku: item.SKU,
-                  marca: item.Marca,
-                  modelo: item.Modelo,
-                  ano: item.Ano,
-                  components: [],
-                  requiredFasteners: [],
-                  sellingPriceOverride: item['Preco de Venda (Opcional)'],
-              };
-              newKits.push(newKit);
-              currentKitSkus.add(item.SKU.toLowerCase());
+              newKits.push(item);
           }
 
           if (newKits.length > 0) {
@@ -456,61 +464,81 @@ export const useInventory = (): InventoryHook => {
     const currentKits = await api.getKits();
     
     // Obter dados auxiliares para o gerador
-    const [ws, cons, ops] = await Promise.all([
+    const [ws, cons, ops, prodOrders, manOrders] = await Promise.all([
         api.getWorkStations(),
         api.getConsumables(),
-        api.getStandardOperations()
+        api.getStandardOperations(),
+        api.getProductionOrders(),
+        api.getManufacturingOrders()
     ]);
 
     const allGeneratedProducts = new Map<string, { product: Component, familia: FamiliaComponente }>();
     
-    // Ordena as famílias para processar pais antes de filhos (Simplificado por busca de dependência)
+    // Ordena as famílias para processar dependências básicas primeiro
     const sortedFamilias = [...familias].sort((a, b) => {
-        const aIsParent = a.nodes.some(n => n.data.type === 'productGenerator' && !n.data.componentIdTemplate);
-        const bIsParent = b.nodes.some(n => n.data.type === 'productGenerator' && !n.data.componentIdTemplate);
-        return aIsParent === bIsParent ? 0 : aIsParent ? -1 : 1;
+        const bDependsOnA = b.nodes.some(n => n.data.sourceFamiliaId === a.id);
+        const aDependsOnB = a.nodes.some(n => n.data.sourceFamiliaId === b.id);
+        if (bDependsOnA && !aDependsOnB) return -1;
+        if (aDependsOnB && !bDependsOnA) return 1;
+        return 0;
     });
 
-    for (const familia of sortedFamilias) {
-        if (familia.nodes?.some(n => n.data.type === 'productGenerator')) {
-            // FIX: Passando config com allFamilias para permitir herança de DNA no gerador
-            const generatedProducts = generateAllProductsForFamilia(familia, newComponentList, currentKits, {
-                workStations: ws,
-                consumables: cons,
-                operations: ops,
-                allFamilias: familias
-            });
+    // Executamos duas passagens para garantir que custos de sub-montagens sejam propagados corretamente
+    for (let i = 0; i < 2; i++) {
+        for (const familia of sortedFamilias) {
+            if (familia.nodes?.some(n => n.data.type === 'productGenerator' || n.data.type === 'productGeneratorNode')) {
+                const generatedProducts = generateAllProductsForFamilia(familia, newComponentList, currentKits, {
+                    workStations: ws,
+                    consumables: cons,
+                    operations: ops,
+                    allFamilias: familias
+                });
 
-            generatedProducts.forEach(p => {
-                const component: Component = {
-                    id: `comp-${p.sku}`,
-                    name: p.name,
-                    sku: p.sku,
-                    stock: 0,
-                    type: 'component',
-                    sourcing: p.defaultSourcing || 'manufactured',
-                    familiaId: familia.id,
-                    custoFabricacao: p.custoFabricacao,
-                    custoMateriaPrima: p.custoMateriaPrima,
-                };
-                allGeneratedProducts.set(p.sku, { product: component, familia });
-            });
+                generatedProducts.forEach(p => {
+                    const component: Component = {
+                        id: `comp-${p.sku}`,
+                        name: p.name,
+                        sku: p.sku,
+                        stock: 0,
+                        type: 'component',
+                        sourcing: p.defaultSourcing || 'manufactured',
+                        familiaId: familia.id,
+                        custoFabricacao: p.custoFabricacao,
+                        custoMateriaPrima: p.custoMateriaPrima,
+                    };
+                    allGeneratedProducts.set(p.sku, { product: component, familia });
+                    
+                    // Atualiza a lista local imediatamente para que a próxima família (ou próxima iteração) veja o custo novo
+                    const existingIdx = newComponentList.findIndex(c => c.sku === p.sku);
+                    if (existingIdx >= 0) {
+                        newComponentList[existingIdx] = {
+                            ...newComponentList[existingIdx],
+                            custoFabricacao: p.custoFabricacao,
+                            custoMateriaPrima: p.custoMateriaPrima,
+                            familiaId: familia.id,
+                            name: p.name,
+                            sourcing: p.defaultSourcing || 'manufactured'
+                        };
+                    } else {
+                        newComponentList.push(component);
+                    }
+                });
+            }
         }
     }
     
     for (const [sku, { product, familia }] of allGeneratedProducts.entries()) {
-        const existingComponent = newComponentList.find(c => c.sku === sku);
+        const existingComponent = allInventoryItems.find(c => c.sku === sku);
         if (!existingComponent) {
-            newComponentList.push(product);
+            // Já adicionamos ao newComponentList no loop acima, mas precisamos marcar para o report
             report.createdComponents.push(product);
             hasChanges = true;
         } else {
             const oldCost = getComponentCost(existingComponent);
             const newCost = getComponentCost(product);
             if (Math.abs(oldCost - newCost) > 0.01 || existingComponent.familiaId !== familia.id || existingComponent.name !== product.name || existingComponent.sourcing !== product.sourcing) {
-                const updatedComponent = { ...existingComponent, custoFabricacao: product.custoFabricacao, custoMateriaPrima: product.custoMateriaPrima, familiaId: familia.id, name: product.name, sourcing: product.sourcing };
-                newComponentList = newComponentList.map(c => c.id === existingComponent.id ? updatedComponent : c);
-                report.updatedComponents.push({ ...updatedComponent, oldCost: oldCost, newCost: newCost });
+                // O newComponentList já foi atualizado no loop acima, apenas registramos no report
+                report.updatedComponents.push({ ...product, oldCost: oldCost, newCost: newCost });
                 hasChanges = true;
             }
         }
@@ -531,7 +559,7 @@ export const useInventory = (): InventoryHook => {
     if (hasChanges) {
         await api.saveComponents(newComponentList);
         await addActivityLog(`Sincronização de custos e SKUs concluída: ${report.createdComponents.length} criados, ${report.updatedComponents.length} atualizados.`);
-        const componentsWithUpdatedStock = calculateAllStock(newComponentList, inventoryLogs);
+        const componentsWithUpdatedStock = calculateAllStock(newComponentList, inventoryLogs, prodOrders, manOrders);
         setComponents(componentsWithUpdatedStock);
     }
     
@@ -548,12 +576,24 @@ const analyzeProductionRun = useCallback((
 ): { scenarios: ProductionScenario[], virtualComponents: Component[] } => {
     
     const aggregatedKitComponents = new Map<string, number>(); 
+    
+    const keyComponents = allInventoryItems.filter(c => c.name?.toLowerCase().includes('chave'));
+    const keyFixS = keyComponents.find(c => c.name?.toLowerCase().includes('fix-s') || c.name?.toLowerCase().includes('fix s') || c.name?.toLowerCase().includes('chave t'));
+    const keyFixP = keyComponents.find(c => c.name?.toLowerCase().includes('fix-p') || c.name?.toLowerCase().includes('fix p') || c.name?.toLowerCase().includes('chave p'));
+    const keyPorP = keyComponents.find(c => c.name?.toLowerCase().includes('por-p') || c.name?.toLowerCase().includes('por p') || c.name?.toLowerCase().includes('chave p'));
+
     order.forEach(orderItem => {
         const kit = findKitById(orderItem.kitId);
         if (!kit) return;
         (kit.components || []).forEach(comp => {
             aggregatedKitComponents.set(comp.componentSku, (aggregatedKitComponents.get(comp.componentSku) || 0) + (comp.quantity * orderItem.quantity));
         });
+        
+        if (orderItem.variant === 'Fix-S' && keyFixS) {
+            aggregatedKitComponents.set(keyFixS.sku, (aggregatedKitComponents.get(keyFixS.sku) || 0) + orderItem.quantity);
+        } else if (orderItem.variant === 'Fix-P' && keyFixP) {
+            aggregatedKitComponents.set(keyFixP.sku, (aggregatedKitComponents.get(keyFixP.sku) || 0) + orderItem.quantity);
+        }
     });
 
     (additionalItems || []).forEach((item: { componentId: string, quantity: number }) => {
@@ -567,7 +607,7 @@ const analyzeProductionRun = useCallback((
         const codes = new Set<string>();
         familias.forEach(f => {
             (f.nodes || []).forEach(n => {
-                if ((n.data.type === 'headCodeTable' || n.data.type === 'codificationTable') && n.data.headCodes) {
+                if (((n.data.type as string) === 'headCodeTable' || (n.data.type as string) === 'codificationTable' || (n.data.type as string) === 'codificationTableNode') && n.data.headCodes) {
                     (n.data.headCodes || []).forEach((hc: any) => {
                         if (hc.code) codes.add(hc.code);
                     });
@@ -583,25 +623,43 @@ const analyzeProductionRun = useCallback((
     const virtualComponents = new Map<string, Component>();
     const componentSkuMap = new Map(allInventoryItems.map(c => [c.sku, c]));
     
-    const preferredId = settings.preferredFastenerFamiliaId || 'fam-fixadores';
-    const preferredFastenerFamilia = familias.find(f => f.id === preferredId);
+    const fastenerFamilia = familias.find(f => f.id === 'fam-fixadores');
+    const fixSFamilia = familias.find(f => f.id === 'fam-MONTAGEM-FIX-S' || f.nome?.toLowerCase() === 'montagem fix-s');
+    const fixPFamilia = familias.find(f => f.id === 'fam-MONTAGEM-FIX-P' || f.nome?.toLowerCase() === 'montagem fix-p');
+    const porPFamilia = familias.find(f => f.id === 'fam-MONTAGEM-POR-P' || f.nome?.toLowerCase() === 'montagem por-p');
     
     for (const headCode of headCodesToRun) {
         const scenarioRequirements = new Map(aggregatedKitComponents);
         
-        if (preferredFastenerFamilia) {
-            const generatorNode = (preferredFastenerFamilia.nodes || []).find(n => n.data.type === 'productGenerator');
-            const skuTemplate = generatorNode?.data.generationConfig?.skuTemplate || 'FIX-S-{headCode}-M{bitola}x{comprimento}';
+        order.forEach(orderItem => {
+            const kit = findKitById(orderItem.kitId);
+            if (!kit) return;
             
-            order.forEach(orderItem => {
-                const kit = findKitById(orderItem.kitId);
-                if (!kit) return;
+            const itemHeadCode = orderItem.fastenerHeadCode || headCode;
+            
+            (kit.requiredFasteners || []).forEach(fastener => {
+                const dimString = fastener.dimension.replace('mm', '');
+                const [bitola, comprimento] = dimString.split('x');
+                const isNut = dimString.endsWith('x0') || dimString.includes('x0');
                 
-                const itemHeadCode = orderItem.fastenerHeadCode || headCode;
+                let familiaToUse = fastenerFamilia;
                 
-                (kit.requiredFasteners || []).forEach(fastener => {
-                    const dimString = fastener.dimension.replace('mm', '');
-                    const [bitola, comprimento] = dimString.split('x');
+                if (isNut) {
+                    familiaToUse = porPFamilia;
+                } else {
+                    if (orderItem.variant === 'Fix-S') familiaToUse = fixSFamilia;
+                    else if (orderItem.variant === 'Fix-P') familiaToUse = fixPFamilia;
+                    else familiaToUse = fixSFamilia; // Default to Fix-S if no variant specified
+                }
+
+                if (familiaToUse) {
+                    const generatorNode = (familiaToUse.nodes || []).find(n => n.data.type === 'productGenerator');
+                    let defaultTemplate = 'FIX-S-{headCode}-M{bitola}x{comprimento}';
+                    if (isNut) defaultTemplate = 'POR-P-{headCode}-M{bitola}x{comprimento}';
+                    else if (orderItem.variant === 'Fix-P') defaultTemplate = 'FIX-P-{headCode}-M{bitola}x{comprimento}';
+                    
+                    const skuTemplate = generatorNode?.data.generationConfig?.skuTemplate || defaultTemplate;
+                    
                     const fastenerSku = skuTemplate
                         .replace(/{headCode}/gi, itemHeadCode)
                         .replace(/{bitola}/gi, bitola)
@@ -609,9 +667,22 @@ const analyzeProductionRun = useCallback((
                         .replace(/{dimensao}/gi, dimString);
                     const totalQuantity = fastener.quantity * orderItem.quantity;
                     scenarioRequirements.set(fastenerSku, (scenarioRequirements.get(fastenerSku) || 0) + totalQuantity);
-                });
+                } else {
+                    let defaultTemplate = 'FIX-S-{headCode}-M{bitola}x{comprimento}';
+                    if (isNut) defaultTemplate = 'POR-P-{headCode}-M{bitola}x{comprimento}';
+                    else if (orderItem.variant === 'Fix-P') defaultTemplate = 'FIX-P-{headCode}-M{bitola}x{comprimento}';
+                    
+                    const skuTemplate = defaultTemplate;
+                    const fastenerSku = skuTemplate
+                        .replace(/{headCode}/gi, itemHeadCode)
+                        .replace(/{bitola}/gi, bitola)
+                        .replace(/{comprimento}/gi, comprimento)
+                        .replace(/{dimensao}/gi, dimString);
+                    const totalQuantity = fastener.quantity * orderItem.quantity;
+                    scenarioRequirements.set(fastenerSku, (scenarioRequirements.get(fastenerSku) || 0) + totalQuantity);
+                }
             });
-        }
+        });
 
         const scenario: ProductionScenario = {
             isPossible: true, fastenerHeadCode: headCode || 'Análise Geral', totalCost: 0,
@@ -677,10 +748,22 @@ const analyzeProductionRun = useCallback((
             component = componentSkuMap.get(sku) || virtualComponents.get(sku);
 
             if (!component) {
+                let name = `Componente Desconhecido (${sku})`;
+                if (sku.startsWith('FIX-S')) {
+                    const parts = sku.split('-');
+                    if (parts.length >= 4) name = `Fixador FIX-S ${parts[2]} ${parts[3]}`;
+                } else if (sku.startsWith('POR-P')) {
+                    const parts = sku.split('-');
+                    if (parts.length >= 4) name = `Porca POR-P ${parts[2]} ${parts[3]}`;
+                } else if (sku.startsWith('FIX-P')) {
+                    const parts = sku.split('-');
+                    if (parts.length >= 4) name = `Fixador FIX-P ${parts[2]} ${parts[3]}`;
+                }
+
                 scenario.isPossible = false;
                 scenario.shortages.push({ 
                     componentId: `unknown-${sku}`, 
-                    componentName: `Componente Desconhecido (${sku})`, 
+                    componentName: name, 
                     required, available: 0, shortage: required, unitCost: 0, totalShortageValue: 0 
                 });
                 continue;
@@ -691,8 +774,14 @@ const analyzeProductionRun = useCallback((
             const totalItemCost = required * unitCost;
 
             scenario.totalCost += totalItemCost;
-            scenario.costBreakdown.materialCost += (component.custoMateriaPrima || 0) * required;
-            scenario.costBreakdown.fabricationCost += (component.custoFabricacao || 0) * required;
+            
+            // FIX: Se for matéria prima ou comprado, o custo total vai para materialCost
+            if (component.type === 'raw_material' || component.sourcing === 'purchased') {
+                scenario.costBreakdown.materialCost += totalItemCost;
+            } else {
+                scenario.costBreakdown.materialCost += (component.custoMateriaPrima || 0) * required;
+                scenario.costBreakdown.fabricationCost += (component.custoFabricacao || 0) * required;
+            }
             
             scenario.detailedRequirements.push({ 
                 componentId: component.id, componentName: component.name, 
@@ -748,18 +837,39 @@ const executeProductionRun = useCallback(async (order: ProductionOrder) => {
         });
     });
 
-    (order.orderItems || []).forEach(item => {
+    for (const item of (order.orderItems || [])) {
         const kit = findKitById(item.kitId);
         if (kit) {
-            logs.push({
-                componentId: `kit-prod-${kit.sku}`, 
-                type: 'entrada',
-                quantity: item.quantity,
-                reason: 'conclusao_ordem_producao',
-                notes: `Produzido para Ordem de Produção ${order.id}`
-            });
+            const kitSku = `${kit.sku}${item.variant && item.variant !== 'Padrão' ? `-${item.variant}` : ''}`;
+            let kitComponent = currentComponents.find(c => c.sku === kitSku);
+            
+            if (!kitComponent) {
+                const newComponentData = {
+                    name: `${kit.name} ${item.variant && item.variant !== 'Padrão' ? `(${item.variant})` : ''}`,
+                    sku: kitSku,
+                    type: 'component' as 'component',
+                    sourcing: 'manufactured' as 'manufactured',
+                    minStock: 0,
+                    custoFabricacao: 0,
+                    custoMateriaPrima: 0
+                };
+                await addComponent(newComponentData);
+                // Refresh current components after adding
+                const updatedComponents = await api.getComponents();
+                kitComponent = updatedComponents.find(c => c.sku === kitSku);
+            }
+
+            if (kitComponent) {
+                logs.push({
+                    componentId: kitComponent.id, 
+                    type: 'entrada',
+                    quantity: item.quantity,
+                    reason: 'conclusao_ordem_producao',
+                    notes: `Produzido para Ordem de Produção ${order.id}`
+                });
+            }
         }
-    });
+    }
 
     if (logs.length > 0) {
         await addMultipleInventoryLogs(logs);
@@ -768,7 +878,7 @@ const executeProductionRun = useCallback(async (order: ProductionOrder) => {
     await addActivityLog(`Ordem de Produção ${order.id} concluída e estoque atualizado.`);
     addToast(`Ordem ${order.id} concluída. Estoque foi atualizado.`, 'success');
 
-}, [addMultipleInventoryLogs, addActivityLog, addToast, findKitById]);
+}, [addMultipleInventoryLogs, addActivityLog, addToast, findKitById, addComponent]);
 
 const createAndStockComponent = useCallback(async (componentData: { sku: string; name: string; familiaId: string; }) => {
     const existing = findComponentBySku(componentData.sku);

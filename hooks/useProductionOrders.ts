@@ -99,6 +99,16 @@ export const useProductionOrders = ({ executeProductionRun }: ProductionOrdersHo
     }, [loadData]);
 
 
+    const updateProductionOrderTracking = useCallback(async (orderId: string, tracking: { actualCost?: number; actualTimeSeconds?: number }) => {
+        const currentOrders = await api.getProductionOrders();
+        const newOrders = currentOrders.map(order => 
+            order.id === orderId ? { ...order, ...tracking } : order
+        );
+        await api.saveProductionOrders(newOrders);
+        await addActivityLog(`Acompanhamento da Ordem de Produção ${orderId} atualizado.`, { orderId, ...tracking });
+        await loadData();
+    }, [addActivityLog, loadData]);
+
     const deleteProductionOrder = useCallback(async (orderId: string) => {
         const currentOrders = await api.getProductionOrders();
         const orderToDelete = currentOrders.find(o => o.id === orderId);
@@ -120,15 +130,31 @@ export const useProductionOrders = ({ executeProductionRun }: ProductionOrdersHo
         await loadData();
     }, [addActivityLog, loadData]);
 
+    const updateMultipleProductionOrders = useCallback(async (ordersToUpdate: ProductionOrder[]) => {
+        try {
+            const currentOrders = await api.getProductionOrders();
+            const updateMap = new Map(ordersToUpdate.map(o => [o.id, o]));
+            const newOrders = currentOrders.map(o => updateMap.get(o.id) || o);
+            await api.saveProductionOrders(newOrders);
+            await addActivityLog(`Atualizou ${ordersToUpdate.length} ordens de produção via planilha.`);
+            await loadData();
+        } catch (e) {
+            console.error("Failed to batch update production orders:", e);
+            throw e;
+        }
+    }, [addActivityLog, loadData]);
+
 
     return {
         productionOrders,
         isLoading,
         addProductionOrder,
         updateProductionOrderStatus,
+        updateMultipleProductionOrders,
         updateScannedItems,
         updateOrderFulfillment,
         deleteProductionOrder,
         updateProductionOrderInstallments,
+        updateProductionOrderTracking,
     };
 };

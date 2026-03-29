@@ -16,7 +16,7 @@ export const Card: React.FC<CardProps> = ({ children, className = '', variant = 
 
   return (
     <div 
-      className={`${variants[variant]} rounded-xl p-5 transition-all duration-200 hover:shadow-md ${className}`} 
+      className={`${variants[variant]} rounded-xl p-3 sm:p-4 md:p-5 transition-all duration-200 hover:shadow-md ${className}`} 
       {...props}
     >
       {children}

@@ -1,23 +1,26 @@
 import React, { useState, useMemo } from 'react';
 // FIX: Import KitComponent to resolve type errors.
-import { InventoryHook, Kit, ManufacturingHook, AggregatedPart, SaleDetails, QuoteItem, KitComponent, Component } from '../types';
-import { Card } from './ui/Card';
-import { evaluateProcess, getComponentCost } from '../hooks/manufacturing-evaluator';
-import { Select } from './ui/Select';
-import { Button } from './ui/Button';
+import { InventoryHook, Kit, ManufacturingHook, AggregatedPart, SaleDetails, QuoteItem, KitComponent, Component } from './types';
+import { Card } from './components/ui/Card';
+import { evaluateProcess, getComponentCost } from './hooks/manufacturing-evaluator';
+import { Select } from './components/ui/Select';
+import { Button } from './components/ui/Button';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
-import { EmailReportModal } from './ui/EmailReportModal';
-import { useFinancials } from '../contexts/FinancialsContext';
-import { Input } from './ui/Input';
+import { EmailReportModal } from './components/ui/EmailReportModal';
+import { useFinancials } from './contexts/FinancialsContext';
+import { Input } from './components/ui/Input';
 
 interface KitsByBrandViewProps {
     inventory: InventoryHook;
     manufacturing: ManufacturingHook;
 }
 
-const formatCurrency = (value: number) => value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const formatCurrency = (value: number | undefined | null) => {
+    if (value === undefined || value === null || isNaN(Number(value))) return 'R$ 0,00';
+    return Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+};
 
 const StatCard: React.FC<{ title: string; value: string | number; description?: string }> = ({ title, value, description }) => (
     <div className="bg-autro-blue-light p-4 rounded-lg">

@@ -27,27 +27,34 @@ interface WidgetProps {
   isMobile: boolean;
 }
 
-const formatCurrency = (value: number) => value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const formatCurrency = (value: number | undefined | null) => {
+    if (value === undefined || value === null || isNaN(Number(value))) return 'R$ 0,00';
+    return Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+};
 
-const formatCompactCurrency = (value: number) => {
-    if (Math.abs(value) < 1000) {
-        return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const formatCompactCurrency = (value: number | undefined | null) => {
+    if (value === undefined || value === null || isNaN(Number(value))) return 'R$ 0,00';
+    const numValue = Number(value);
+    if (Math.abs(numValue) < 1000) {
+        return numValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
     }
     return new Intl.NumberFormat('pt-BR', {
         notation: 'compact',
         style: 'currency',
         currency: 'BRL',
         maximumFractionDigits: 1
-    }).format(value);
+    }).format(numValue);
 };
-const formatCompactNumber = (value: number) => {
-    if (Math.abs(value) < 1000) {
-        return value.toLocaleString('pt-BR');
+const formatCompactNumber = (value: number | undefined | null) => {
+    if (value === undefined || value === null || isNaN(Number(value))) return '0';
+    const numValue = Number(value);
+    if (Math.abs(numValue) < 1000) {
+        return numValue.toLocaleString('pt-BR');
     }
     return new Intl.NumberFormat('pt-BR', {
         notation: 'compact',
         maximumFractionDigits: 1
-    }).format(value);
+    }).format(numValue);
 };
 
 const getComponentCost = (component: Component): number => {
@@ -69,7 +76,12 @@ const renderContent = (
                 case 'inventoryValue':
                     value = inventory.components.reduce((sum, c) => sum + (c.stock * getComponentCost(c)), 0);
                     description = `em ${inventory.components.length} SKUs`;
-                    return <p className="text-3xl font-bold text-autro-blue" title={description}>{formatCompactCurrency(value)}</p>;
+                    return (
+                        <div className="text-center">
+                            <p className="text-3xl font-bold text-autro-blue" title={description}>{formatCompactCurrency(value)}</p>
+                            <p className="text-xs text-gray-500 mt-1">Total em estoque</p>
+                        </div>
+                    );
                 case 'pendingProduction':
                     value = productionOrdersHook.productionOrders.filter(o => o.status === 'pendente').length;
                     description = 'Ordens de Montagem';
@@ -86,12 +98,16 @@ const renderContent = (
             return <div>Métrica KPI desconhecida</div>;
         }
         case 'alerts': {
-            const lowStockItems = inventory.components.filter(c => c.stock > 0 && c.stock <= 10);
+            const lowStockItems = inventory.components.filter(c => {
+                const available = c.stock - (c.reservedStock || 0);
+                return available <= 10;
+            });
             if (lowStockItems.length === 0) return <p className="text-gray-500">Nenhum alerta de estoque.</p>;
             return (
                 <div className="text-center">
                     <p className="text-4xl font-bold text-yellow-500">{lowStockItems.length}</p>
-                    <p className="text-sm text-yellow-600">Componentes com baixo estoque</p>
+                    <p className="text-sm text-yellow-600">Disponibilidade Crítica</p>
+                    <p className="text-xs text-gray-400 mb-2">(Estoque - Reservado ≤ 10)</p>
                     <Button size="sm" variant="secondary" className="mt-2" onClick={() => { setComponentFilter({ type: 'low-stock' }); setCurrentView(View.COMPONENTS); }}>Ver Itens</Button>
                 </div>
             );

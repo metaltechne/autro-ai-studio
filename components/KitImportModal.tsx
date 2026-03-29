@@ -125,8 +125,8 @@ export const KitImportModal: React.FC<KitImportModalProps> = ({ isOpen, onClose,
             if (fastenerStr) {
                 fastenerStr.split(',').forEach(part => {
                     const [dim, qtyStr] = part.split(':').map(s => s.trim());
-                    if (!dim || isNaN(parseInt(qtyStr, 10)) || !dim.match(/^\d+x\d+mm$/)) {
-                        compositionErrors.push(`Formato do fixador inválido: '${part}'. Use '8x40mm:2'.`);
+                    if (!dim || isNaN(parseInt(qtyStr, 10)) || !dim.match(/^(?:M)?\d+x\d+(?:mm)?$/i)) {
+                        compositionErrors.push(`Formato do fixador inválido: '${part}'. Use '8x40mm:2' ou 'M6x20:4'.`);
                     }
                 });
             }
@@ -152,10 +152,25 @@ export const KitImportModal: React.FC<KitImportModalProps> = ({ isOpen, onClose,
     const handleConfirm = async () => {
         setStatus('importing');
         try {
-            const kitsToCreate = validatedData.filter(r => r.isValid && r.mode === 'create').map(r => r.data);
+            const kitsToCreateData = validatedData.filter(r => r.isValid && r.mode === 'create').map(r => r.data);
             const kitsToUpdateData = validatedData.filter(r => r.isValid && r.mode === 'update').map(r => r.data);
 
-            if (kitsToCreate.length > 0) {
+            if (kitsToCreateData.length > 0) {
+                const kitsToCreate: Kit[] = kitsToCreateData.map(item => {
+                    const components = parseCompositionString(item['Componentes (SKU:Qtd)'], false) as KitComponent[];
+                    const fasteners = parseCompositionString(item['Fixadores (Dimensao:Qtd)'], true) as { dimension: string; quantity: number }[];
+                    return {
+                        id: `kit-${item.SKU}-${Date.now()}`,
+                        name: item['Nome do Kit'],
+                        sku: item.SKU,
+                        marca: item.Marca,
+                        modelo: item.Modelo,
+                        ano: item.Ano,
+                        components: components,
+                        requiredFasteners: fasteners,
+                        sellingPriceOverride: item['Preco de Venda (Opcional)'],
+                    };
+                });
                 await addMultipleKits(kitsToCreate);
             }
             

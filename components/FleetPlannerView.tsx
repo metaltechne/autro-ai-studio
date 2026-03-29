@@ -8,7 +8,10 @@ import { useToast } from '../hooks/useToast';
 import { AnalysisResultModal } from './AnalysisResultModal';
 import { useFinancials } from '../contexts/FinancialsContext';
 
-const formatCurrency = (value: number) => value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const formatCurrency = (value: number | undefined | null) => {
+    if (value === undefined || value === null || isNaN(Number(value))) return 'R$ 0,00';
+    return Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+};
 
 interface FleetPlannerViewProps {
     inventory: InventoryHook;
@@ -110,8 +113,8 @@ export const FleetPlannerView: React.FC<FleetPlannerViewProps> = ({ inventory, m
       const lowerFilter = miscItemFilter.toLowerCase();
       return components.filter(c =>
           !miscItemFilter ||
-          c.name.toLowerCase().includes(lowerFilter) ||
-          c.sku.toLowerCase().includes(lowerFilter)
+          (c.name || '').toLowerCase().includes(lowerFilter) ||
+          (c.sku || '').toLowerCase().includes(lowerFilter)
       );
   }, [components, miscItemFilter]);
 
@@ -230,6 +233,23 @@ export const FleetPlannerView: React.FC<FleetPlannerViewProps> = ({ inventory, m
     if (!analysisModalData) return;
     setIsCreatingOrder(true);
     const miscItemsNotes = order.miscItems.map((item: { componentId: string; quantity: number; }) => { const comp = findComponentById(item.componentId); return `${item.quantity}x ${comp?.name || 'Item desconhecido'} (SKU: ${comp?.sku || 'N/A'})`; }).join('\n');
+    
+    // Create virtual components in DB if they don't exist
+    for (const vc of analysisModalData.virtualComponents) {
+        const existing = inventory.findComponentBySku(vc.sku);
+        if (!existing) {
+            await inventory.addComponent({
+                name: vc.name,
+                sku: vc.sku,
+                type: 'component',
+                sourcing: vc.sourcing || 'manufactured',
+                familiaId: vc.familiaId,
+                custoFabricacao: vc.custoFabricacao || 0,
+                custoMateriaPrima: vc.custoMateriaPrima || 0,
+            });
+        }
+    }
+
     const newOrderId = await addProductionOrder({ 
         orderItems: order.kits, 
         selectedScenario: scenario, 
@@ -262,7 +282,7 @@ export const FleetPlannerView: React.FC<FleetPlannerViewProps> = ({ inventory, m
             <div className="flex-grow overflow-y-auto space-y-2 min-h-0">
                 {availableKitsForSelection.map(kit => (
                     <div key={kit.id} className="p-2 border rounded-md bg-white hover:bg-gray-50 flex items-center justify-between gap-2 touch-pan-y">
-                        <div className="flex-grow min-w-0"><p className="font-semibold text-sm text-black truncate">{kit.name}</p><p className="text-xs text-gray-500 truncate">{kit.modelo} ({kit.ano})</p></div>
+                        <div className="flex-grow min-w-0"><p className="font-semibold text-sm text-black leading-tight">{kit.name}</p><p className="text-xs text-gray-500 mt-1">{kit.modelo} ({kit.ano})</p></div>
                         <Button size="sm" variant="secondary" className="!px-2.5 flex-shrink-0" onClick={() => handleAddComponent(kit)} title="Adicionar ao plano">+</Button>
                     </div>
                 ))}
@@ -330,7 +350,7 @@ export const FleetPlannerView: React.FC<FleetPlannerViewProps> = ({ inventory, m
                          {order.kits.map((item: ProductionOrderItem) => {
                             const kit = findKitById(item.kitId); if (!kit) return null;
                             return (<div key={item.kitId} className="p-3 bg-white rounded-md shadow-sm border flex justify-between items-center gap-4">
-                                <div><p className="font-semibold text-black">{kit.name} <span className="text-xs font-normal text-gray-500">[KIT]</span></p><p className="text-sm text-gray-500">{kit.marca} {kit.modelo}</p></div>
+                                <div><p className="font-semibold text-black">{kit.name} <span className="text-xs font-normal text-gray-500">[KIT]</span></p><p className="text-sm text-gray-500">{kit.marca || 'Sem Marca'} {kit.modelo || 'N/A'}</p></div>
                                 <div className="flex items-center gap-2"><Input type="number" value={item.quantity} onChange={(e) => handleKitQuantityChange(item.kitId, parseInt(e.target.value) || 1)} min="1" className="w-20 text-center" /><Button variant="danger" size="sm" onClick={() => handleRemoveKitFromOrder(item.kitId)} className="!p-2" title="Remover">X</Button></div>
                             </div>)
                         })}

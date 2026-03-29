@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { nanoid } from 'https://esm.sh/nanoid@5.0.7';
+import { nanoid } from 'nanoid';
 import { Modal } from './ui/Modal';
 import { Button } from './ui/Button';
 import { Select } from './ui/Select';
@@ -23,7 +23,10 @@ interface ReviewScanModalProps {
     manufacturingOrdersHook: ManufacturingOrdersHook;
 }
 
-const formatCurrency = (value: number) => value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const formatCurrency = (value: number | undefined | null) => {
+    if (value === undefined || value === null || isNaN(Number(value))) return 'R$ 0,00';
+    return Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+};
 const formatDate = (isoString: string) => new Date(isoString).toLocaleDateString('pt-BR', { timeZone: 'UTC' });
 
 export const ReviewScanModal: React.FC<ReviewScanModalProps> = ({ isOpen, onClose, data, purchaseOrdersHook, manufacturingOrdersHook }) => {

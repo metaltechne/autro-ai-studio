@@ -1,7 +1,7 @@
 import React, { createContext, useState, useCallback, ReactNode } from 'react';
 import { Toast, ToastContextType } from '../types';
 import { ToastContainer } from '../components/ui/Toast';
-import { nanoid } from 'https://esm.sh/nanoid@5.0.7';
+import { nanoid } from 'nanoid';
 
 export const ToastContext = createContext<ToastContextType | undefined>(undefined);
 

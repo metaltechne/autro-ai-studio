@@ -197,7 +197,7 @@ export const LabelPrintingView: React.FC<{ inventory: InventoryHook }> = ({ inve
         if (!searchTerm) return inventory.components.filter(c => c.type === 'component');
         const lowerSearch = searchTerm.toLowerCase();
         return inventory.components.filter(c =>
-            c.type === 'component' && (c.name.toLowerCase().includes(lowerSearch) || c.sku.toLowerCase().includes(lowerSearch))
+            c.type === 'component' && ((c.name || '').toLowerCase().includes(lowerSearch) || (c.sku || '').toLowerCase().includes(lowerSearch))
         );
     }, [inventory.components, searchTerm]);
 
@@ -205,7 +205,7 @@ export const LabelPrintingView: React.FC<{ inventory: InventoryHook }> = ({ inve
         if (!searchTerm) return inventory.kits;
         const lowerSearch = searchTerm.toLowerCase();
         return inventory.kits.filter(k =>
-            k.name.toLowerCase().includes(lowerSearch) || k.sku.toLowerCase().includes(lowerSearch)
+            (k.name || '').toLowerCase().includes(lowerSearch) || (k.sku || '').toLowerCase().includes(lowerSearch)
         );
     }, [inventory.kits, searchTerm]);
 

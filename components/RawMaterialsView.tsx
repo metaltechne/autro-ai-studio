@@ -17,7 +17,10 @@ import { useToast } from '../hooks/useToast';
 const ITEMS_PER_PAGE = 25;
 const LOW_STOCK_THRESHOLD = 5;
 
-const formatCurrency = (value: number) => value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const formatCurrency = (value: number | undefined | null) => {
+    if (value === undefined || value === null || isNaN(Number(value))) return 'R$ 0,00';
+    return Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+};
 
 export const RawMaterialsView: React.FC<RawMaterialsViewProps> = ({ inventory, onShowQRCode }) => {
     const { components, addComponent, updateComponent, deleteComponent, addInventoryLog, getLogsForComponent } = inventory;
@@ -46,7 +49,7 @@ export const RawMaterialsView: React.FC<RawMaterialsViewProps> = ({ inventory, o
         if (categoryTab !== 'all') results = results.filter(m => m.unitCategory === categoryTab);
         if (searchTerm) {
             const lower = searchTerm.toLowerCase();
-            results = results.filter(m => m.name.toLowerCase().includes(lower) || m.sku.toLowerCase().includes(lower));
+            results = results.filter(m => (m.name || '').toLowerCase().includes(lower) || (m.sku || '').toLowerCase().includes(lower));
         }
         return results;
     }, [rawMaterials, searchTerm, categoryTab]);
@@ -207,7 +210,13 @@ const MaterialModal: React.FC<{
                         <option value="length">Comprimento (M)</option>
                         <option value="count">Contagem (Un)</option>
                     </Select>
-                    <Input label="Custo Compra" type="number" value={data.purchaseCost} onChange={e => setData({...data, purchaseCost: parseFloat(e.target.value)})} />
+                    <Input label="Custo Compra (R$)" type="number" value={data.purchaseCost} onChange={e => setData({...data, purchaseCost: parseFloat(e.target.value)})} />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                    <Input label="Qtd na Compra" type="number" value={data.purchaseQuantity || 1} onChange={e => setData({...data, purchaseQuantity: parseFloat(e.target.value)})} placeholder="Ex: 3 (se for barra de 3m)" />
+                    <div className="flex items-end pb-1">
+                        <p className="text-[10px] text-slate-400 italic">O custo unitário será calculado automaticamente.</p>
+                    </div>
                 </div>
                 <div className="flex justify-end gap-2 pt-4 border-t"><Button variant="secondary" onClick={onClose}>Cancelar</Button><Button onClick={handleSave}>Confirmar</Button></div>
             </div>

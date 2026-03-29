@@ -1,12 +1,12 @@
 import React, { useState, useMemo } from 'react';
 import { Card } from './ui/Card';
 import { Button } from './ui/Button';
-import { ManufacturingOrdersHook, ManufacturingOrder, InventoryHook, Installment } from '../types';
+import { ManufacturingOrdersHook, ManufacturingOrder, InventoryHook, Installment, ManufacturingHook } from '../types';
 import { FinancialManagementModal } from './ui/FinancialManagementModal';
 
-const formatCurrency = (value: number | undefined) => {
-    if (typeof value !== 'number') return 'R$ --';
-    return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const formatCurrency = (value: number | undefined | null) => {
+    if (value === undefined || value === null || isNaN(Number(value))) return 'R$ 0,00';
+    return Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
 const statusMap: Record<ManufacturingOrder['status'], string> = {
@@ -50,6 +50,22 @@ const OrderCard: React.FC<{ order: ManufacturingOrder, inventory: InventoryHook,
                 <div className="text-gray-600">Custo Previsto:</div><div className="font-semibold text-right">{formatCurrency(order.predictedCost)}</div>
                 <div className="text-gray-600">Total a Pagar:</div><div className="font-semibold text-right text-red-600">{formatCurrency(totalToPay)}</div>
             </div>
+            {order.analysis.detailedBreakdown && order.analysis.detailedBreakdown.length > 0 && (
+                <div className="mt-2 pt-2 border-t border-dashed">
+                    <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Breakdown de Custos:</p>
+                    <div className="space-y-1">
+                        {order.analysis.detailedBreakdown.slice(0, 3).map((step, i) => (
+                            <div key={i} className="flex justify-between text-[9px] text-slate-500">
+                                <span className="truncate pr-2">{step.name}</span>
+                                <span className="font-bold">{formatCurrency(step.cost)}</span>
+                            </div>
+                        ))}
+                        {order.analysis.detailedBreakdown.length > 3 && (
+                            <p className="text-[8px] text-slate-400 italic">...e mais {order.analysis.detailedBreakdown.length - 3} itens</p>
+                        )}
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
@@ -88,8 +104,8 @@ const KanbanColumn: React.FC<{
 };
 
 
-export const ProductionFinancialFlowView: React.FC<{ manufacturingOrdersHook: ManufacturingOrdersHook; inventory: InventoryHook; }> = ({ manufacturingOrdersHook, inventory }) => {
-    const { manufacturingOrders, updateManufacturingOrderStatus, updateManufacturingOrderInstallments } = manufacturingOrdersHook;
+export const ProductionFinancialFlowView: React.FC<{ manufacturingOrdersHook: ManufacturingOrdersHook; inventory: InventoryHook; manufacturing: ManufacturingHook; }> = ({ manufacturingOrdersHook, inventory, manufacturing }) => {
+    const { manufacturingOrders, updateManufacturingOrderStatus, updateManufacturingOrderInstallments, updateManufacturingOrderAnalysis } = manufacturingOrdersHook;
     const [editingOrder, setEditingOrder] = useState<ManufacturingOrder | null>(null);
 
     const orderedOrders = useMemo(() => {
@@ -159,6 +175,15 @@ export const ProductionFinancialFlowView: React.FC<{ manufacturingOrdersHook: Ma
         updateManufacturingOrderStatus(orderId, targetStatus);
     };
 
+    const handleReanalyze = async (orderId: string) => {
+        const order = manufacturingOrders.find(o => o.id === orderId);
+        if (!order) return;
+        
+        const analysis = manufacturing.analyzeManufacturingRun(order.orderItems, inventory.components);
+        await updateManufacturingOrderAnalysis(orderId, analysis);
+        setEditingOrder(prev => prev?.id === orderId ? { ...prev, analysis, predictedCost: analysis.totalCost } : prev);
+    };
+
     const editingOrderWithTotal = useMemo(() => {
         if (!editingOrder) return null;
         return { ...editingOrder, totalValue: editingOrder.predictedCost };
@@ -178,7 +203,7 @@ export const ProductionFinancialFlowView: React.FC<{ manufacturingOrdersHook: Ma
                         <p className="text-sm text-gray-600">A Pagar (Próx. 30 Dias)</p>
                         <p className="text-2xl font-bold text-yellow-600">{formatCurrency(summary.dueNext30Days)}</p>
                     </div>
-                     <div>
+                    <div>
                         <p className="text-sm text-gray-600">Ordens em Produção</p>
                         <p className="text-2xl font-bold text-blue-600">{summary.inProductionCount}</p>
                     </div>
@@ -222,6 +247,7 @@ export const ProductionFinancialFlowView: React.FC<{ manufacturingOrdersHook: Ma
                 order={editingOrderWithTotal}
                 onClose={() => setEditingOrder(null)}
                 onSave={updateManufacturingOrderInstallments}
+                onReanalyze={handleReanalyze}
             />
         </div>
     );

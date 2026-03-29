@@ -205,7 +205,7 @@ export const useInventoryAnalysis = ({
             if (needsExplosion && familiaId) {
                  const familia = familias.find(f => f.id === familiaId);
                  if (familia) {
-                     const analysis = evaluateProcess(familia, variables, components, stringVariables);
+                     const analysis = evaluateProcess(familia, variables, components, stringVariables, { allFamilias: familias });
                      
                      analysis.nodes.forEach(node => {
                          if ((node.data.type === 'materiaPrima' || node.data.type === 'inventoryComponent') && node.data.cost > 0) {

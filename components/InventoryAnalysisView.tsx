@@ -13,7 +13,10 @@ import * as api from '../hooks/api';
 
 type AnalysisTab = 'planning' | 'abc' | 'demand' | 'reorder' | 'materials';
 
-const formatCurrency = (value: number) => value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const formatCurrency = (value: number | undefined | null) => {
+    if (value === undefined || value === null || isNaN(Number(value))) return 'R$ 0,00';
+    return Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+};
 const formatNumber = (value: number, decimals = 2) => value.toLocaleString('pt-BR', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
 const getTimestamp = () => new Date().toISOString().split('T')[0];
 
