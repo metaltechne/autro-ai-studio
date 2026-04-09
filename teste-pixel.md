@@ -1,1 +1,1 @@
-teste-criado-pela-pixel-$(date+time)
+teste-criado-pela-pixel-$(date)
