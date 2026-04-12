@@ -1,0 +1,8 @@
+{
+  "name": "Estoque CRM",
+  "description": "Um sistema inteligente de gerenciamento de estoque para controlar estruturas de kits, componentes e analisar a viabilidade da montagem, inspirado na marca AUTRO.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "prompt": ""
+}
