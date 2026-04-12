@@ -1,1 +1,0 @@
-teste-criado-pela-pixel-$(date)
