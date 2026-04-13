@@ -1,6 +1,7 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { ProductionOrdersHook, PurchaseOrdersHook, ProductionOrder, InventoryHook, Component, CustomersHook } from '../types';
+import * as api from '../hooks/api';
 import { Card } from './ui/Card';
 import { Button } from './ui/Button';
 import { ConfirmationModal } from './ui/ConfirmationModal';
@@ -56,6 +57,23 @@ export const ProductionOrdersView: React.FC<{
     const [statusFilter, setStatusFilter] = useState<'all' | 'pendente' | 'em_montagem' | 'concluída' | 'cancelada'>('all');
     const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
     const [deletingOrder, setDeletingOrder] = useState<ProductionOrder | null>(null);
+    const [isSyncing, setIsSyncing] = useState(false);
+
+    const handleSaveToFirebase = async () => {
+        setIsSyncing(true);
+        try {
+            await api.forceUseFirebase();
+            const localData = await api.getLocalData();
+            await api.restoreAllData(localData);
+            await api.forceUseLocalStorage();
+            addToast('Dados salvos no Firebase!', 'success');
+        } catch (error) {
+            console.error('Save error:', error);
+            addToast('Erro ao salvar no Firebase.', 'error');
+        } finally {
+            setIsSyncing(false);
+        }
+    };
 
     const filteredOrders = useMemo(() => {
         if (!productionOrders) return [];
@@ -116,6 +134,9 @@ export const ProductionOrdersView: React.FC<{
                     <p className="text-slate-500">Controle de fluxo de trabalho e saída de estoque.</p>
                 </div>
                  <div className="flex flex-wrap gap-2">
+                    <Button onClick={handleSaveToFirebase} disabled={isSyncing} variant="primary">
+                        {isSyncing ? 'Salvando...' : '💾 Salvar'}
+                    </Button>
                     <Button onClick={() => window.print()} variant="secondary">Relatório Geral</Button>
                 </div>
             </div>

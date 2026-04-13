@@ -5,6 +5,7 @@ import { CuttingOrdersHook, InventoryHook, CuttingOrder, View } from '../types';
 import { QRCodeScannerModal } from './ui/QRCodeScannerModal';
 import { useToast } from '../hooks/useToast';
 import { ConfirmationModal } from './ui/ConfirmationModal';
+import * as api from '../hooks/api';
 
 const formatDateTime = (isoString?: string) => {
     if (!isoString) return '--';
@@ -120,6 +121,23 @@ export const CuttingOrdersView: React.FC<CuttingOrdersViewProps> = ({ cuttingOrd
     const [scanningFor, setScanningFor] = useState<{ order: CuttingOrder; action: 'start' | 'finish' } | null>(null);
     const [deletingOrder, setDeletingOrder] = useState<CuttingOrder | null>(null);
     const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
+    const [isSyncing, setIsSyncing] = useState(false);
+
+    const handleSaveToFirebase = async () => {
+        setIsSyncing(true);
+        try {
+            await api.forceUseFirebase();
+            const localData = await api.getLocalData();
+            await api.restoreAllData(localData);
+            await api.forceUseLocalStorage();
+            addToast('Dados salvos no Firebase!', 'success');
+        } catch (error) {
+            console.error('Save error:', error);
+            addToast('Erro ao salvar no Firebase.', 'error');
+        } finally {
+            setIsSyncing(false);
+        }
+    };
 
     const ordersByStatus = useMemo(() => {
         return cuttingOrders.reduce((acc, order) => {
@@ -171,9 +189,14 @@ export const CuttingOrdersView: React.FC<CuttingOrdersViewProps> = ({ cuttingOrd
         <div className="h-[calc(100vh-8rem)] flex flex-col">
             <div className="flex justify-between items-center mb-4 flex-shrink-0">
                 <h2 className="text-3xl font-bold text-black">Ordens de Corte</h2>
-                <Button onClick={() => setCurrentView(View.FASTENER_CUTTING)}>
-                    Nova Ordem de Corte
-                </Button>
+                <div className="flex gap-2">
+                    <Button onClick={handleSaveToFirebase} disabled={isSyncing} variant="primary">
+                        {isSyncing ? 'Salvando...' : '💾 Salvar'}
+                    </Button>
+                    <Button onClick={() => setCurrentView(View.FASTENER_CUTTING)}>
+                        Nova Ordem de Corte
+                    </Button>
+                </div>
             </div>
             <div className="flex-grow min-h-0 flex flex-col md:flex-row gap-4">
                 <KanbanColumn 

@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { ManufacturingOrdersHook, ManufacturingOrder, InventoryHook } from '../types';
+import * as api from '../hooks/api';
 import { Card } from './ui/Card';
 import { Button } from './ui/Button';
 import { ConfirmationModal } from './ui/ConfirmationModal';
@@ -205,11 +206,32 @@ export const ManufacturingOrdersView: React.FC<ManufacturingOrdersViewProps> = (
         return { ...editingFinancialsOrder, totalValue: editingFinancialsOrder.predictedCost };
     }, [editingFinancialsOrder]);
 
+    const [isSyncing, setIsSyncing] = useState(false);
+
+    const handleSaveToFirebase = async () => {
+        setIsSyncing(true);
+        try {
+            await api.forceUseFirebase();
+            const localData = await api.getLocalData();
+            await api.restoreAllData(localData);
+            await api.forceUseLocalStorage();
+            addToast('Dados salvos no Firebase!', 'success');
+        } catch (error) {
+            console.error('Save error:', error);
+            addToast('Erro ao salvar no Firebase.', 'error');
+        } finally {
+            setIsSyncing(false);
+        }
+    };
+
     return (
         <div>
             <div className="flex flex-col md:flex-row justify-between md:items-center mb-6 gap-4">
                 <h2 className="text-3xl font-bold text-black">Ordens de Fabricação</h2>
                 <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
+                    <Button onClick={handleSaveToFirebase} disabled={isSyncing} variant="primary">
+                        {isSyncing ? 'Salvando...' : '💾 Salvar'}
+                    </Button>
                     <Button onClick={() => window.print()} variant="secondary" disabled={filteredOrders.length === 0}>Imprimir</Button>
                     <Button onClick={handleExportPDF} variant="secondary" disabled={filteredOrders.length === 0}>PDF</Button>
                     <Button onClick={handleExportExcel} variant="secondary" disabled={filteredOrders.length === 0}>Excel</Button>
