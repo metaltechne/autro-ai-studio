@@ -77,26 +77,9 @@ export const useManufacturing = (): ManufacturingHook => {
         }
     }, [familias, workStations, consumables, standardOperations]);
 
-    useEffect(() => {
-        const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-            if (isDirty) {
-                saveChanges();
-                e.preventDefault();
-                e.returnValue = '';
-            }
-        };
-        window.addEventListener('beforeunload', handleBeforeUnload);
-        return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-    }, [isDirty, saveChanges]);
-
-    useEffect(() => {
-        if (isDirty) {
-            const timer = setTimeout(() => {
-                saveChanges();
-            }, 2000); // Debounce de 2 segundos
-            return () => clearTimeout(timer);
-        }
-    }, [isDirty, saveChanges]);
+    // REMOVIDO: Auto-save causava excesso de escritas no Firebase
+    // Agora o usuário precisa clicar em "Salvar Alterações" manualmente
+    // Isso экономит dados e да ao usuário controle sobre quando sincronizar
 
     const getActiveFamilia = useCallback(() => familias.find(f => f.id === activeFamiliaId), [familias, activeFamiliaId]);
 
