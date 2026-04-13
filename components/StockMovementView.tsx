@@ -7,6 +7,7 @@ import { Select } from './ui/Select';
 import { InventoryHook, ScannedQRCodeData, Component, InventoryLogReason, SessionItem } from '../types';
 import { useToast } from '../hooks/useToast';
 import { ConfirmationModal } from './ui/ConfirmationModal';
+import * as api from '../hooks/api';
 
 declare global {
     interface Window {
@@ -39,6 +40,23 @@ export const StockMovementView: React.FC<{ inventory: InventoryHook }> = ({ inve
     const [isConfirming, setIsConfirming] = useState(false);
     const [scannedItem, setScannedItem] = useState<Component | null>(null);
     const [quantityToAdd, setQuantityToAdd] = useState(1);
+    const [isSyncing, setIsSyncing] = useState(false);
+
+    const handleSaveToFirebase = async () => {
+        setIsSyncing(true);
+        try {
+            await api.forceUseFirebase();
+            const localData = await api.getLocalData();
+            await api.restoreAllData(localData);
+            await api.forceUseLocalStorage();
+            addToast('Dados salvos no Firebase!', 'success');
+        } catch (error) {
+            console.error('Save error:', error);
+            addToast('Erro ao salvar no Firebase.', 'error');
+        } finally {
+            setIsSyncing(false);
+        }
+    };
     
     const scannerRef = useRef<any>(null);
     const scannerContainerId = 'qr-reader';
@@ -148,16 +166,21 @@ export const StockMovementView: React.FC<{ inventory: InventoryHook }> = ({ inve
                     <h2 className="text-4xl font-black text-slate-900 tracking-tighter uppercase italic">Mission Control: Terminal</h2>
                     <p className="text-slate-500 font-medium uppercase text-[10px] tracking-[0.2em]">Operação de Fluxo de Estoque em Tempo Real</p>
                 </div>
-                <div className="flex bg-slate-200 p-1.5 rounded-2xl w-full md:w-auto shadow-inner">
-                    {['entrada', 'baixa', 'conferencia'].map((t) => (
-                        <button
-                            key={t}
-                            onClick={() => { setActiveTab(t as ActiveTab); setSessionItems(new Map()); setScannedItem(null); }}
-                            className={`flex-1 md:w-32 py-2 px-4 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === t ? 'bg-white text-slate-900 shadow-md scale-105' : 'text-slate-500 hover:text-slate-700'}`}
-                        >
-                            {t}
-                        </button>
-                    ))}
+                <div className="flex items-center gap-2">
+                    <Button onClick={handleSaveToFirebase} disabled={isSyncing} variant="primary">
+                        {isSyncing ? 'Salvando...' : '💾 Salvar'}
+                    </Button>
+                    <div className="flex bg-slate-200 p-1.5 rounded-2xl w-full md:w-auto shadow-inner">
+                        {['entrada', 'baixa', 'conferencia'].map((t) => (
+                            <button
+                                key={t}
+                                onClick={() => { setActiveTab(t as ActiveTab); setSessionItems(new Map()); setScannedItem(null); }}
+                                className={`flex-1 md:w-32 py-2 px-4 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === t ? 'bg-white text-slate-900 shadow-md scale-105' : 'text-slate-500 hover:text-slate-700'}`}
+                            >
+                                {t}
+                            </button>
+                        ))}
+                    </div>
                 </div>
             </header>
 

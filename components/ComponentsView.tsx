@@ -18,6 +18,7 @@ import { usePermissions } from '../hooks/usePermissions';
 import { ComponentEditModal } from './ComponentEditModal';
 import { getComponentCost } from '../hooks/manufacturing-evaluator';
 import { useToast } from '../hooks/useToast';
+import * as api from '../hooks/api';
 
 const ITEMS_PER_PAGE = 25;
 const LOW_STOCK_THRESHOLD = 10;
@@ -53,6 +54,24 @@ export const ComponentsView: React.FC<ComponentsViewProps> = ({ inventory, manuf
     const processControlledFamiliaIds = useMemo(() => 
         new Set(familias.filter(f => f.nodes?.some(n => n.data.type === 'productGenerator')).map(f => f.id)), 
     [familias]);
+
+    const [isSyncing, setIsSyncing] = useState(false);
+
+    const handleSaveToFirebase = async () => {
+        setIsSyncing(true);
+        try {
+            await api.forceUseFirebase();
+            const localData = await api.getLocalData();
+            await api.restoreAllData(localData);
+            await api.forceUseLocalStorage();
+            addToast('Dados salvos no Firebase!', 'success');
+        } catch (error) {
+            console.error('Save error:', error);
+            addToast('Erro ao salvar no Firebase.', 'error');
+        } finally {
+            setIsSyncing(false);
+        }
+    };
 
     const filteredComponents = useMemo(() => {
         let results = components.filter(c => c.type === 'component');
@@ -97,6 +116,9 @@ export const ComponentsView: React.FC<ComponentsViewProps> = ({ inventory, manuf
                     <p className="text-slate-500 font-medium">Gestão tática de itens processados e acabados.</p>
                 </div>
                 <div className="flex items-center gap-2">
+                    <Button onClick={handleSaveToFirebase} disabled={isSyncing} variant="primary">
+                        {isSyncing ? 'Salvando...' : '💾 Salvar'}
+                    </Button>
                     <Button 
                         onClick={async () => {
                             await recalculateAllComponentCosts();

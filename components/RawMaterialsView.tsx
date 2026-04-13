@@ -8,6 +8,7 @@ import { Select } from './ui/Select';
 import { ConfirmationModal } from './ui/ConfirmationModal';
 import { Component, InventoryHook, ScannedQRCodeData } from '../types';
 import { InventoryLogModal } from './InventoryLogModal';
+import * as api from '../hooks/api';
 import { InventoryHistoryModal } from './InventoryHistoryModal';
 import { Pagination } from './ui/Pagination';
 import { EmptyState } from './ui/EmptyState';
@@ -37,6 +38,23 @@ export const RawMaterialsView: React.FC<RawMaterialsViewProps> = ({ inventory, o
     const [isLogModalOpen, setIsLogModalOpen] = useState(false);
     const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
     const [deletingMaterial, setDeletingMaterial] = useState<Component | null>(null);
+    const [isSyncing, setIsSyncing] = useState(false);
+
+    const handleSaveToFirebase = async () => {
+        setIsSyncing(true);
+        try {
+            await api.forceUseFirebase();
+            const localData = await api.getLocalData();
+            await api.restoreAllData(localData);
+            await api.forceUseLocalStorage();
+            addToast('Dados salvos no Firebase!', 'success');
+        } catch (error) {
+            console.error('Save error:', error);
+            addToast('Erro ao salvar no Firebase.', 'error');
+        } finally {
+            setIsSyncing(false);
+        }
+    };
 
     const rawMaterials = useMemo(() =>
         components.filter(c => c.type === 'raw_material')
@@ -77,6 +95,9 @@ export const RawMaterialsView: React.FC<RawMaterialsViewProps> = ({ inventory, o
                     <p className="text-slate-500 font-medium">Controle de insumos brutos e suprimentos de base.</p>
                 </div>
                 <div className="flex items-center gap-2">
+                    <Button onClick={handleSaveToFirebase} disabled={isSyncing} variant="primary">
+                        {isSyncing ? 'Salvando...' : '💾 Salvar'}
+                    </Button>
                     <div className="bg-slate-100 p-1 rounded-xl flex border border-slate-200">
                         <button onClick={() => setViewMode('list')} className={`p-2 rounded-lg transition-all ${viewMode === 'list' ? 'bg-white shadow-sm text-autro-primary' : 'text-slate-400'}`}>
                             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path d="M4 6h16M4 12h16M4 18h16" /></svg>
