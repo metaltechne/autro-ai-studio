@@ -10,6 +10,7 @@ import { useFinancials } from '../contexts/FinancialsContext';
 import { BRAZIL_UFS } from '../contexts/FinancialsContext';
 import { Select } from './ui/Select';
 import { nanoid } from 'nanoid';
+import { Cloud, CloudOff, RefreshCw, Save, Download, Upload } from 'lucide-react';
 
 interface SettingsViewProps {
     inventory: InventoryHook;
@@ -42,6 +43,67 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ inventory, manufactu
     const [isResetting, setIsResetting] = useState(false);
     const [isConfirmingFullReset, setIsConfirmingFullReset] = useState(false);
     const [isPerformingFullReset, setIsPerformingFullReset] = useState(false);
+
+    // Sync State (Firebase vs LocalStorage)
+    const [storageMode, setStorageMode] = useState<'localStorage' | 'firebase' | 'unknown'>('unknown');
+    const [isSyncing, setIsSyncing] = useState(false);
+    
+    useEffect(() => {
+        setStorageMode(api.getStorageMode() as 'localStorage' | 'firebase');
+    }, []);
+
+    const handleEnableFirebase = async () => {
+        localStorage.setItem('forceFirebase', 'true');
+        api.forceUseFirebase();
+        setStorageMode('firebase');
+        addToast('Firebase ativado! A página será recarregada.', 'info');
+        setTimeout(() => window.location.reload(), 1500);
+    };
+
+    const handleDisableFirebase = () => {
+        localStorage.setItem('forceFirebase', 'false');
+        api.forceUseLocalStorage();
+        setStorageMode('localStorage');
+        addToast('Modo localStorage ativado (econômico)', 'success');
+    };
+
+    const handleSyncToFirebase = async () => {
+        if (!confirm('Isso vai sobrecrever todos os dados do Firebase com os dados locais. Continuar?')) return;
+        setIsSyncing(true);
+        try {
+            await api.forceUseFirebase();
+            const localData = await api.getLocalData();
+            await api.restoreAllData(localData);
+            await api.forceUseLocalStorage();
+            setStorageMode('localStorage');
+            addToast('Dados sincronizados para Firebase!', 'success');
+        } catch (error) {
+            console.error('Sync error:', error);
+            addToast('Erro ao sincronizar.', 'error');
+        } finally {
+            setIsSyncing(false);
+        }
+    };
+
+    const handleSyncFromFirebase = async () => {
+        if (!confirm('Isso vai substituir todos os dados locais pelos dados do Firebase. Continuar?')) return;
+        setIsSyncing(true);
+        try {
+            await api.forceUseFirebase();
+            const firebaseData = await api.getAllData();
+            api.clearLocalData();
+            await api.restoreAllData(firebaseData);
+            await api.forceUseLocalStorage();
+            setStorageMode('localStorage');
+            addToast('Dados restaurados do Firebase! A página será recarregada.', 'success');
+            setTimeout(() => window.location.reload(), 1500);
+        } catch (error) {
+            console.error('Restore error:', error);
+            addToast('Erro ao restaurar do Firebase.', 'error');
+        } finally {
+            setIsSyncing(false);
+        }
+    };
 
     // Maintenance State
     const [isRebuilding, setIsRebuilding] = useState(false);
@@ -454,7 +516,50 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ inventory, manufactu
                         </div>
                     )}
                 </Card>
-                 <Card>
+                {/* 🎯 Sincronização Firebase */}
+                <Card className={storageMode === 'firebase' ? 'border-blue-500' : 'border-green-500'}>
+                    <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-xl font-semibold text-black">Armazenamento de Dados</h3>
+                        <span className={`px-3 py-1 rounded-full text-xs font-bold ${storageMode === 'firebase' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>
+                            {storageMode === 'firebase' ? <><Cloud className="w-3 h-3 inline mr-1" />Firebase</> : <><CloudOff className="w-3 h-3 inline mr-1" />Local (Econômico)</>}
+                        </span>
+                    </div>
+                    
+                    <div className="p-4 bg-gray-50 rounded-lg mb-4">
+                        <p className="text-sm text-gray-600 mb-2">
+                            <strong>Modo atual:</strong> {storageMode === 'firebase' ? 'Firebase (usa dados do plano gratuito)' : 'localStorage (econômico - não consome Firebase)'}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                            O modo localStorage salva todos os dados no navegador. Use Firebase apenas para sincronizar entre dispositivos.
+                        </p>
+                    </div>
+
+                    <div className="flex flex-wrap gap-3">
+                        {storageMode === 'localStorage' ? (
+                            <>
+                                <Button onClick={handleEnableFirebase} variant="secondary" className="flex-1">
+                                    <Cloud className="w-4 h-4 mr-2" />Ativar Firebase
+                                </Button>
+                                <div className="w-full text-center text-xs text-gray-400 py-2">ou</div>
+                                <Button onClick={handleSyncToFirebase} disabled={isSyncing} variant="secondary" className="flex-1">
+                                    <RefreshCw className={`w-4 h-4 mr-2 ${isSyncing ? 'animate-spin' : ''}`} />
+                                    {isSyncing ? 'Sincronizando...' : 'Sincronizar para Firebase'}
+                                </Button>
+                            </>
+                        ) : (
+                            <>
+                                <Button onClick={handleDisableFirebase} variant="secondary" className="flex-1">
+                                    <CloudOff className="w-4 h-4 mr-2" />Voltar para Local
+                                </Button>
+                                <Button onClick={handleSyncFromFirebase} disabled={isSyncing} variant="secondary" className="flex-1">
+                                    <RefreshCw className={`w-4 h-4 mr-2 ${isSyncing ? 'animate-spin' : ''}`} />
+                                    {isSyncing ? 'Restaurando...' : 'Restaurar do Firebase'}
+                                </Button>
+                            </>
+                        )}
+                    </div>
+                </Card>
+                <Card>
                     <h3 className="text-xl font-semibold text-black mb-2">Configurações de IA</h3>
                     <p className="text-sm text-gray-600 mb-4">
                         A chave de API do Google Gemini agora é gerenciada por variáveis de ambiente no servidor e não pode ser configurada aqui.

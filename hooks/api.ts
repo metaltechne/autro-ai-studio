@@ -63,18 +63,47 @@ const DB_KEYS = {
     lastModified: 'lastModified',
 };
 
-let storageMode: 'firebase' | 'localStorage' = 'firebase';
+// 🎯 MODO PADRÃO: localStorage (economiza Firebase gratuito)
+// Para usar Firebase, chame forceUseFirebase() manualmente
+let storageMode: 'firebase' | 'localStorage' = 'localStorage';
 let permissionChecked = false;
 
+// Força o uso do Firebase (para sincronização manual)
+export const forceUseFirebase = () => {
+    console.log('🔄 Alternando para modo Firebase (sincronização)');
+    storageMode = 'firebase';
+};
+
+// Força o uso do localStorage (padrão - экономит Firebase)
+export const forceUseLocalStorage = () => {
+    console.log('💾 Alternando para modo localStorage');
+    storageMode = 'localStorage';
+};
+
+// Retorna o modo atual
+export const getStorageMode = () => storageMode;
+
 const checkFirebasePermission = async () => {
+    // Por padrão, usa localStorage para economizar Firebase gratuito
+    // Firebase só é usado se o usuário explicitamente pedir sincronização
     if (permissionChecked) return;
-    try {
-        const checkPromise = get(child(ref(db), DB_KEYS.seeded));
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Firebase Timeout')), 5000));
-        await Promise.race([checkPromise, timeoutPromise]);
-        storageMode = 'firebase';
-    } catch (e: any) {
-        console.warn('Usando modo local por falha de conexão:', e);
+    
+    // Verifica se há flag de forçar Firebase
+    const forceFirebase = localStorage.getItem('forceFirebase');
+    if (forceFirebase === 'true') {
+        try {
+            const checkPromise = get(child(ref(db), DB_KEYS.seeded));
+            const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Firebase Timeout')), 5000));
+            await Promise.race([checkPromise, timeoutPromise]);
+            storageMode = 'firebase';
+            console.log('✅ Conectado ao Firebase (modo forçado)');
+        } catch (e: any) {
+            console.warn('❌ Falha ao conectar Firebase, usando localStorage:', e);
+            storageMode = 'localStorage';
+        }
+    } else {
+        // Modo padrão: localStorage
+        console.log('💾 Usando localStorage (modo econômico)');
         storageMode = 'localStorage';
     }
     permissionChecked = true;
