@@ -68,6 +68,27 @@ const DB_KEYS = {
 let storageMode: 'firebase' | 'localStorage' = 'localStorage';
 let permissionChecked = false;
 
+// Contador de operações para métricas
+let readCount = 0;
+let writeCount = 0;
+let lastResetTime = Date.now();
+
+export const getUsageStats = () => {
+    const hoursSinceReset = (Date.now() - lastResetTime) / (1000 * 60 * 60);
+    return {
+        reads: readCount,
+        writes: writeCount,
+        totalOps: readCount + writeCount,
+        hoursSinceReset: hoursSinceReset.toFixed(1),
+    };
+};
+
+export const resetUsageStats = () => {
+    readCount = 0;
+    writeCount = 0;
+    lastResetTime = Date.now();
+};
+
 // Força o uso do Firebase (para sincronização manual)
 export const forceUseFirebase = () => {
     console.log('🔄 Alternando para modo Firebase (sincronização)');
@@ -143,6 +164,7 @@ export const forceRebuildCorruptedProcesses = async (): Promise<'rebuilt' | 'no_
 };
 
 const getData = async <T>(key: string, defaultValue: T): Promise<T> => {
+    readCount++;
     if (storageMode === 'localStorage') {
         const localData = localStorage.getItem(key);
         return localData ? JSON.parse(localData) : defaultValue;
@@ -157,6 +179,7 @@ const getData = async <T>(key: string, defaultValue: T): Promise<T> => {
 };
 
 const saveData = async <T>(key: string, value: T): Promise<void> => {
+    writeCount++;
     const sanitizedValue = sanitizeForFirebase(value);
     if (storageMode === 'localStorage') {
         localStorage.setItem(key, JSON.stringify(sanitizedValue));

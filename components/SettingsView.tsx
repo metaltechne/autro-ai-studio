@@ -47,6 +47,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ inventory, manufactu
     // Sync State (Firebase vs LocalStorage)
     const [storageMode, setStorageMode] = useState<'localStorage' | 'firebase' | 'unknown'>('unknown');
     const [isSyncing, setIsSyncing] = useState(false);
+    const [usageStats, setUsageStats] = useState({ reads: 0, writes: 0, totalOps: 0, hoursSinceReset: '0.0' });
+
+    useEffect(() => {
+        const interval = setInterval(() => {
+            setUsageStats(api.getUsageStats());
+        }, 2000);
+        return () => clearInterval(interval);
+    }, []);
     
     useEffect(() => {
         setStorageMode(api.getStorageMode() as 'localStorage' | 'firebase');
@@ -558,6 +566,36 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ inventory, manufactu
                             </>
                         )}
                     </div>
+                </Card>
+                {/* 📊 Métricas de Uso */}
+                <Card>
+                    <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-xl font-semibold text-black">Métricas de Uso</h3>
+                        <Button size="sm" variant="secondary" onClick={() => { api.resetUsageStats(); setUsageStats(api.getUsageStats()); }}>
+                            Resetar
+                        </Button>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div className="p-3 bg-blue-50 rounded-lg text-center">
+                            <div className="text-2xl font-bold text-blue-600">{usageStats.reads}</div>
+                            <div className="text-xs text-blue-800">Leituras</div>
+                        </div>
+                        <div className="p-3 bg-green-50 rounded-lg text-center">
+                            <div className="text-2xl font-bold text-green-600">{usageStats.writes}</div>
+                            <div className="text-xs text-green-800">Escritas</div>
+                        </div>
+                        <div className="p-3 bg-purple-50 rounded-lg text-center">
+                            <div className="text-2xl font-bold text-purple-600">{usageStats.totalOps}</div>
+                            <div className="text-xs text-purple-800">Total Ops</div>
+                        </div>
+                        <div className="p-3 bg-gray-50 rounded-lg text-center">
+                            <div className="text-2xl font-bold text-gray-600">{usageStats.hoursSinceReset}h</div>
+                            <div className="text-xs text-gray-800">Desde Reset</div>
+                        </div>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-3">
+                        Contador local que mede operações de leitura/escrita. Reseta automaticamente a cada hora ou manualmente.
+                    </p>
                 </Card>
                 <Card>
                     <h3 className="text-xl font-semibold text-black mb-2">Configurações de IA</h3>
