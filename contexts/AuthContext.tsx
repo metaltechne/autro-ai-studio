@@ -1,7 +1,7 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { User, onAuthStateChanged, signOut } from '@firebase/auth';
-import { auth } from '../firebaseConfig';
+import { User } from '@supabase/supabase-js';
+import { supabase } from '../supabaseConfig';
 import { UserRole, UserProfile } from '../types';
 import * as api from '../hooks/api';
 
@@ -58,10 +58,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [role, setRole] = useState<UserRole | null>(null);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        setUser(user);
-        const userRole = await getUserRoleFromFirebase(user.uid, user.email);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (session?.user) {
+        setUser(session.user);
+        const userRole = await getUserRoleFromFirebase(session.user.id, session.user.email || null);
         setRole(userRole);
       } else {
         setUser(null);
@@ -70,11 +70,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => subscription.unsubscribe();
   }, []);
   
   const logout = async () => {
-    await signOut(auth);
+    await supabase.auth.signOut();
   };
 
   const value: AuthContextType = { user, loading, role, logout };

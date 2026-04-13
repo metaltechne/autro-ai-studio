@@ -2,8 +2,7 @@
 import { BackupData, FinancialSettings, Component, Kit, InventoryLog, FamiliaComponente, PurchaseOrder, ProductionOrder, ManufacturingOrder, CuttingOrder, PromotionalCampaign, UserProfile, ActivityLog, Customer, WorkStation, Consumable, StandardOperation, FinancialTransaction, FinancialAccount, FinancialCategory, ReceivingOrder, SupplierProductMapping } from '../types';
 // @ts-ignore
 import { INITIAL_FAMILIAS, INITIAL_COMPONENTS, INITIAL_KITS, INITIAL_INVENTORY_LOGS, INITIAL_WORKSTATIONS, INITIAL_CONSUMABLES, INITIAL_OPERATIONS } from '../data/initial-inventory';
-import { db } from '../firebaseConfig';
-import { ref, get, set, remove, child } from '@firebase/database';
+import { supabase } from '../supabaseConfig';
 
 export const DEFAULT_FINANCIAL_SETTINGS: FinancialSettings = {
     companyName: 'AUTRO',
@@ -64,8 +63,8 @@ const DB_KEYS = {
 };
 
 // 🎯 MODO PADRÃO: localStorage (economiza Firebase gratuito)
-// Para usar Firebase, chame forceUseFirebase() manualmente
-let storageMode: 'firebase' | 'localStorage' = 'localStorage';
+// Para usar Firebase, chame forceUseSupabase() manualmente
+let storageMode: 'supabase' | 'localStorage' = 'localStorage';
 let permissionChecked = false;
 
 // Contador de operações para métricas
@@ -89,13 +88,16 @@ export const resetUsageStats = () => {
     lastResetTime = Date.now();
 };
 
-// Força o uso do Firebase (para sincronização manual)
-export const forceUseFirebase = () => {
-    console.log('🔄 Alternando para modo Firebase (sincronização)');
-    storageMode = 'firebase';
+// Força o uso do Supabase (para sincronização manual)
+export const forceUseSupabase = () => {
+    console.log('🔄 Alternando para modo Supabase (sincronização)');
+    storageMode = 'supabase';
 };
 
-// Força o uso do localStorage (padrão - экономит Firebase)
+// Alias para compatibilidade com componentes existentes
+export const forceUseFirebase = forceUseSupabase;
+
+// Força o uso do localStorage (padrão)
 export const forceUseLocalStorage = () => {
     console.log('💾 Alternando para modo localStorage');
     storageMode = 'localStorage';
@@ -104,63 +106,142 @@ export const forceUseLocalStorage = () => {
 // Retorna o modo atual
 export const getStorageMode = () => storageMode;
 
-const checkFirebasePermission = async () => {
-    // Por padrão, usa localStorage para economizar Firebase gratuito
-    // Firebase só é usado se o usuário explicitamente pedir sincronização
+const checkSupabasePermission = async () => {
+    // Por padrão, usa localStorage para economia
+    // Supabase só é usado se o usuário explicitamente pedir sincronização
     if (permissionChecked) return;
     
-    // Verifica se há flag de forçar Firebase
-    const forceFirebase = localStorage.getItem('forceFirebase');
-    if (forceFirebase === 'true') {
+    // Verifica se há flag de forçar Supabase
+    const forceSupabase = localStorage.getItem('forceSupabase');
+    if (forceSupabase === 'true') {
         try {
-            const checkPromise = get(child(ref(db), DB_KEYS.seeded));
-            const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Firebase Timeout')), 5000));
-            await Promise.race([checkPromise, timeoutPromise]);
-            storageMode = 'firebase';
-            console.log('✅ Conectado ao Firebase (modo forçado)');
+            const { data, error } = await supabase.from('app_data').select('seeded').eq('id', 'main').single();
+            if (error) throw error;
+            storageMode = 'supabase';
+            console.log('✅ Conectado ao Supabase (modo forçado)');
         } catch (e: any) {
-            console.warn('❌ Falha ao conectar Firebase, usando localStorage:', e);
+            console.warn('❌ Falha ao conectar Supabase, usando localStorage:', e);
             storageMode = 'localStorage';
         }
     } else {
         // Modo padrão: localStorage
-        console.log('💾 Usando localStorage (modo econômico)');
+        console.log('💾 Usando localStorage (modo padrão)');
         storageMode = 'localStorage';
     }
     permissionChecked = true;
 };
 
-const sanitizeForFirebase = (data: any): any => {
+const sanitizeForSupabase = (data: any): any => {
     if (data === undefined) return null;
     if (typeof data === 'number') {
         if (!Number.isFinite(data) || Number.isNaN(data)) return 0; 
         return data;
     }
     if (data === null || typeof data !== 'object') return data;
-    if (Array.isArray(data)) return data.map(item => sanitizeForFirebase(item));
+    if (Array.isArray(data)) return data.map(item => sanitizeForSupabase(item));
     const sanitizedObject: { [key: string]: any } = {};
     for (const key in data) {
         if (Object.prototype.hasOwnProperty.call(data, key)) {
             const value = data[key];
-            if (value !== undefined) sanitizedObject[key] = sanitizeForFirebase(value);
+            if (value !== undefined) sanitizedObject[key] = sanitizeForSupabase(value);
         }
     }
     return sanitizedObject;
 };
 
-const dbRef = ref(db);
+// Mapeamento das chaves para nomes de coluna no Supabase
+const DB_KEYS_MAP: Record<string, string> = {
+    seeded: 'seeded',
+    components: 'components',
+    kits: 'kits',
+    inventoryLogs: 'inventorylogs',
+    familias: 'familias',
+    purchaseOrders: 'purchaseorders',
+    poCounter: 'pocounter',
+    productionOrders: 'productionorders',
+    prodCounter: 'prodcounter',
+    manufacturingOrders: 'manufacturingorders',
+    moCounter: 'mocounter',
+    cuttingOrders: 'cuttingorders',
+    coCounter: 'cocounter',
+    financialSettings: 'financialsettings',
+    userRoles: 'userroles',
+    rolePermissions: 'rolepermissions',
+    promotionalCampaigns: 'promotionalcampaigns',
+    activityLogs: 'activitylogs',
+    customers: 'customers',
+    workStations: 'workstations',
+    consumables: 'consumables',
+    standardOperations: 'standardoperations',
+    financialTransactions: 'financialtransactions',
+    financialAccounts: 'financialaccounts',
+    financialCategories: 'financialcategories',
+    receivingOrders: 'receivingorders',
+    supplierProductMappings: 'supplierproductmappings',
+    receivingCounter: 'receivingcounter',
+    tasks: 'tasks',
+    lastModified: 'lastmodified',
+};
+
+// Cache local dos dados do Supabase
+let supabaseCache: Record<string, any> = {};
 
 export const updateLastModified = async () => {
     const timestamp = Date.now();
     if (storageMode === 'localStorage') {
         localStorage.setItem(DB_KEYS.lastModified, JSON.stringify(timestamp));
     } else {
-        await set(child(dbRef, DB_KEYS.lastModified), timestamp);
+        supabaseCache[DB_KEYS.lastModified] = timestamp;
+        await supabase.from('app_data').upsert({ id: 'main', lastmodified: timestamp, updated_at: new Date().toISOString() });
     }
 };
 
 export const forceRebuildCorruptedProcesses = async (): Promise<'rebuilt' | 'no_issues'> => {
     return 'no_issues';
+};
+
+// Carrega todos os dados do Supabase para o cache
+const loadSupabaseData = async () => {
+    try {
+        const { data, error } = await supabase.from('app_data').select('*').eq('id', 'main').single();
+        if (error) throw error;
+        if (data) {
+            supabaseCache = {
+                seeded: data.seeded,
+                components: data.components || [],
+                kits: data.kits || [],
+                inventoryLogs: data.inventorylogs || [],
+                familias: data.familias || [],
+                purchaseOrders: data.purchaseorders || [],
+                poCounter: data.pocounter || 1,
+                productionOrders: data.productionorders || [],
+                prodCounter: data.prodcounter || 1,
+                manufacturingOrders: data.manufacturingorders || [],
+                moCounter: data.mocounter || 1,
+                cuttingOrders: data.cuttingorders || [],
+                coCounter: data.cocounter || 1,
+                financialSettings: data.financialsettings || {},
+                userRoles: data.userroles || [],
+                rolePermissions: data.rolepermissions || [],
+                promotionalCampaigns: data.promotionalcampaigns || [],
+                activityLogs: data.activitylogs || [],
+                customers: data.customers || [],
+                workStations: data.workstations || [],
+                consumables: data.consumables || [],
+                standardOperations: data.standardoperations || [],
+                financialTransactions: data.financialtransactions || [],
+                financialAccounts: data.financialaccounts || [],
+                financialCategories: data.financialcategories || [],
+                receivingOrders: data.receivingorders || [],
+                supplierProductMappings: data.supplierproductmappings || [],
+                receivingCounter: data.receivingcounter || 1,
+                tasks: data.tasks || [],
+                lastModified: data.lastmodified || 0,
+            };
+        }
+    } catch (e) {
+        console.error('Erro ao carregar dados do Supabase:', e);
+    }
 };
 
 const getData = async <T>(key: string, defaultValue: T): Promise<T> => {
@@ -169,29 +250,30 @@ const getData = async <T>(key: string, defaultValue: T): Promise<T> => {
         const localData = localStorage.getItem(key);
         return localData ? JSON.parse(localData) : defaultValue;
     }
-    try {
-        const snapshot = await get(child(dbRef, key));
-        return snapshot.exists() ? snapshot.val() : defaultValue;
-    } catch (e) {
-        console.error(`Erro ao ler chave Firebase: ${key}`, e);
-        return defaultValue;
+    // Modo Supabase
+    if (Object.keys(supabaseCache).length === 0) {
+        await loadSupabaseData();
     }
+    return supabaseCache[key] !== undefined ? supabaseCache[key] : defaultValue;
 };
 
 const saveData = async <T>(key: string, value: T): Promise<void> => {
     writeCount++;
-    const sanitizedValue = sanitizeForFirebase(value);
+    const sanitizedValue = sanitizeForSupabase(value);
     if (storageMode === 'localStorage') {
         localStorage.setItem(key, JSON.stringify(sanitizedValue));
         await updateLastModified();
         return;
     }
+    // Modo Supabase
     try {
-        await set(child(dbRef, key), sanitizedValue);
+        supabaseCache[key] = sanitizedValue;
+        const dbKey = DB_KEYS_MAP[key] || key;
+        await supabase.from('app_data').upsert({ id: 'main', [dbKey]: sanitizedValue, updated_at: new Date().toISOString() });
         await updateLastModified();
     } catch (e) {
-         console.error(`Erro ao gravar chave Firebase: ${key}`, e);
-         throw e; 
+        console.error(`Erro ao salvar no Supabase: ${key}`, e);
+        throw e;
     }
 };
 
@@ -201,14 +283,16 @@ const removeData = async (key: string): Promise<void> => {
         return;
     }
     try {
-        await remove(child(dbRef, key));
-    } catch(e) {
-         console.error(`Erro ao remover chave Firebase: ${key}`, e);
+        supabaseCache[key] = null;
+        const dbKey = DB_KEYS_MAP[key] || key;
+        await supabase.from('app_data').upsert({ id: 'main', [dbKey]: null, updated_at: new Date().toISOString() });
+    } catch (e) {
+        console.error(`Erro ao remover do Supabase: ${key}`, e);
     }
 };
 
 export const initializeDatabase = async (): Promise<{status: 'ok' | 'conflict', localDate?: Date, firebaseDate?: Date}> => {
-    await checkFirebasePermission();
+    await checkSupabasePermission();
     
     const seeded = await getData(DB_KEYS.seeded, false);
     if (seeded) return { status: 'ok' };
@@ -462,9 +546,9 @@ export const getTasks = async (): Promise<Task[]> => getData(DB_KEYS.tasks, []);
 export const saveTasks = async (tasks: Task[]): Promise<void> => saveData(DB_KEYS.tasks, tasks);
 
 export const getAllData = async (): Promise<BackupData> => {
-    if (storageMode === 'firebase') {
-        const snapshot = await get(dbRef);
-        return snapshot.exists() ? snapshot.val() : ({} as BackupData);
+    if (storageMode === 'supabase') {
+        await loadSupabaseData();
+        return supabaseCache as BackupData;
     } else {
         return getLocalData();
     }
@@ -475,9 +559,9 @@ export const restoreAllData = async (data: BackupData): Promise<void> => {
     if (data.familias && Array.isArray(data.familias)) {
         dataToRestore.familias = data.familias.map(familia => ({ ...familia, nodes: familia.nodes || [], edges: familia.edges || [] }));
     }
-    if (storageMode === 'firebase') {
-        const sanitizedData = sanitizeForFirebase(dataToRestore);
-        await set(dbRef, sanitizedData);
+    if (storageMode === 'supabase') {
+        const sanitizedData = sanitizeForSupabase(dataToRestore);
+        await supabase.from('app_data').upsert({ id: 'main', ...sanitizedData, updated_at: new Date().toISOString() });
     } else {
         localStorage.clear();
         for (const key of Object.keys(DB_KEYS)) {
@@ -496,7 +580,7 @@ export const clearTransactionalData = async (): Promise<void> => {
 export const resetAndSeedDatabase = async (): Promise<void> => {
     const userRoles = await getUserRoles();
     const allKeys = Object.values(DB_KEYS);
-    if (storageMode === 'firebase') {
+    if (storageMode === 'supabase') {
         for (const key of allKeys) await removeData(key);
     } else {
         localStorage.clear();
@@ -527,7 +611,7 @@ export const clearLocalData = (): void => {
 };
 
 export const overwriteFirebaseWithLocal = async (): Promise<void> => {
-    if (storageMode !== 'firebase') return;
+    if (storageMode !== 'supabase') return;
     const localData = await getLocalData();
     if (!localData || !localData.seeded) return;
     await restoreAllData(localData);

@@ -16,6 +16,7 @@
     "@google/genai": "^1.9.0",
     "@hello-pangea/dnd": "^18.0.1",
     "@radix-ui/react-tabs": "^1.1.13",
+    "@supabase/supabase-js": "^2.103.0",
     "@vercel/kv": "^2.0.0",
     "chart.js": "^4.4.3",
     "dagre": "^0.8.5",

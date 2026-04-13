@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { signInWithEmailAndPassword, GoogleAuthProvider, OAuthProvider, signInWithPopup } from '@firebase/auth';
-import { auth } from '../firebaseConfig';
+import { signInWithPassword } from '@supabase/supabase-js';
+import { supabase } from '../supabaseConfig';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { Card } from './ui/Card';
@@ -36,7 +36,8 @@ export const LoginView: React.FC = () => {
     setError(null);
     setIsLoading(true);
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) throw error;
     } catch (err: any) {
       setError('Falha ao fazer login. Verifique seu e-mail e senha.');
       console.error(err);
@@ -45,18 +46,19 @@ export const LoginView: React.FC = () => {
     }
   };
 
-  const handleSocialLogin = async (provider: GoogleAuthProvider | OAuthProvider) => {
+  const handleSocialLogin = async (provider: 'google') => {
     setError(null);
     setIsLoading(true);
     try {
-        await signInWithPopup(auth, provider);
+      if (provider === 'google') {
+        const { error } = await supabase.auth.signInWithOAuth({ provider: 'google' });
+        if (error) throw error;
+      }
     } catch (error: any) {
-        console.error(error);
-        if (error.code !== 'auth/popup-closed-by-user') {
-            setError('Falha ao fazer login. Tente novamente.');
-        }
+      console.error(error);
+      setError('Falha ao fazer login. Tente novamente.');
     } finally {
-        setIsLoading(false);
+      setIsLoading(false);
     }
   }
 
