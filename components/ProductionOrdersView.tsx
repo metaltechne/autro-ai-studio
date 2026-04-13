@@ -62,11 +62,11 @@ export const ProductionOrdersView: React.FC<{
     const handleSaveToFirebase = async () => {
         setIsSyncing(true);
         try {
-            await api.forceUseFirebase();
+            await api.forceUseSupabase();
             const localData = await api.getLocalData();
             await api.restoreAllData(localData);
             await api.forceUseLocalStorage();
-            addToast('Dados salvos no Firebase!', 'success');
+            addToast('Dados salvos no Supabase!', 'success');
         } catch (error) {
             console.error('Save error:', error);
             addToast('Erro ao salvar no Firebase.', 'error');

@@ -62,9 +62,8 @@ const DB_KEYS = {
     lastModified: 'lastModified',
 };
 
-// 🎯 MODO PADRÃO: localStorage (economiza Firebase gratuito)
-// Para usar Firebase, chame forceUseSupabase() manualmente
-let storageMode: 'supabase' | 'localStorage' = 'localStorage';
+// 🎯 MODO PADRÃO: Supabase (compartilhado entre usuários)
+let storageMode: 'supabase' | 'localStorage' = 'supabase';
 let permissionChecked = false;
 
 // Contador de operações para métricas
@@ -124,9 +123,16 @@ const checkSupabasePermission = async () => {
             storageMode = 'localStorage';
         }
     } else {
-        // Modo padrão: localStorage
-        console.log('💾 Usando localStorage (modo padrão)');
-        storageMode = 'localStorage';
+        // Modo padrão: Supabase (compartilhado)
+        try {
+            const { data, error } = await supabase.from('app_data').select('seeded').eq('id', 'main').single();
+            if (error) throw error;
+            storageMode = 'supabase';
+            console.log('✅ Conectado ao Supabase');
+        } catch (e) {
+            console.warn('❌ Falha ao conectar Supabase:', e);
+            storageMode = 'localStorage';
+        }
     }
     permissionChecked = true;
 };

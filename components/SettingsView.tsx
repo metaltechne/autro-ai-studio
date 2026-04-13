@@ -62,7 +62,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ inventory, manufactu
 
     const handleEnableFirebase = async () => {
         localStorage.setItem('forceFirebase', 'true');
-        api.forceUseFirebase();
+        api.forceUseSupabase();
         setStorageMode('firebase');
         addToast('Firebase ativado! A página será recarregada.', 'info');
         setTimeout(() => window.location.reload(), 1500);
@@ -79,7 +79,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ inventory, manufactu
         if (!confirm('Isso vai sobrecrever todos os dados do Firebase com os dados locais. Continuar?')) return;
         setIsSyncing(true);
         try {
-            await api.forceUseFirebase();
+            await api.forceUseSupabase();
             const localData = await api.getLocalData();
             await api.restoreAllData(localData);
             await api.forceUseLocalStorage();
@@ -97,7 +97,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ inventory, manufactu
         if (!confirm('Isso vai substituir todos os dados locais pelos dados do Firebase. Continuar?')) return;
         setIsSyncing(true);
         try {
-            await api.forceUseFirebase();
+            await api.forceUseSupabase();
             const firebaseData = await api.getAllData();
             api.clearLocalData();
             await api.restoreAllData(firebaseData);
