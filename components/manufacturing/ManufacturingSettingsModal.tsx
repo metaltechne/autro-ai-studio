@@ -764,7 +764,14 @@ export const ManufacturingSettingsModal: React.FC<ManufacturingSettingsModalProp
                                                                         type="number"
                                                                         className="w-20 text-lg font-black text-sky-600 bg-white border border-slate-200 rounded px-2 py-0.5 outline-none"
                                                                         value={ws.hourlyRate}
-                                                                        onChange={e => handleUpdateStation(ws.id, { hourlyRate: parseFloat(e.target.value) || 0 })}
+                                                                        onChange={e => {
+                                                                            const val = e.target.value;
+                                                                            const newVal = val === '' ? 0 : parseFloat(val);
+                                                                            if (!isNaN(newVal) && newVal !== ws.hourlyRate) {
+                                                                                console.log(`[Settings] Update ${ws.id} hourlyRate: ${ws.hourlyRate} -> ${newVal}`);
+                                                                                handleUpdateStation(ws.id, { hourlyRate: newVal });
+                                                                            }
+                                                                        }}
                                                                     />
                                                                 </div>
                                                             ) : (

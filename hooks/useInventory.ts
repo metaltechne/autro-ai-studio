@@ -1,13 +1,19 @@
 
-import { useState, useCallback, useMemo, useEffect } from 'react';
-import { Component, Kit, ProductionScenario, InventoryHook, FamiliaComponente, InventoryLog, ProductionOrderItem, SyncReport, ComponentImportData, ProcessDimension, StockAdjustmentImportData, KitImportData, KitComponent, SubstitutionOption, ProductionScenarioShortage, ProductionOrder, ManufacturingOrder, FinancialSettings, SaleItem, WorkStation, Consumable, StandardOperation } from '../types';
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import { Component, Kit, ProductionScenario, InventoryHook, FamiliaComponente, InventoryLog, ProductionOrderItem, SyncReport, ComponentImportData, StockAdjustmentImportData, KitImportData, KitComponent, SubstitutionOption, ProductionScenarioShortage, ProductionOrder, ManufacturingOrder, FinancialSettings, SaleItem, WorkStation, Consumable, StandardOperation } from '../types';
 import { evaluateProcess, generateAllProductsForFamilia, getComponentCost, parseFastenerSku } from './manufacturing-evaluator';
 import { nanoid } from 'nanoid';
 import * as api from './api';
 import { useToast } from './useToast';
 import { useActivityLog } from '../contexts/ActivityLogContext';
+import { useSaveLock } from '../contexts/SaveLockContext';
 
 export const useInventory = (): InventoryHook => {
+  const { addToast } = useToast();
+  const { addActivityLog } = useActivityLog();
+  const { isBlocked, blockSave, incrementSaveCount } = useSaveLock();
+  const lastSaveTime = useRef(0);
+  const consecutiveRapidSaves = useRef(0);
   const [components, setComponents] = useState<Component[]>([]);
   const [kits, setKits] = useState<Kit[]>([]);
   const [inventoryLogs, setInventoryLogs] = useState<InventoryLog[]>([]);
@@ -17,9 +23,6 @@ export const useInventory = (): InventoryHook => {
   const [autoSaveEnabled, setAutoSaveEnabled] = useState(true);
   const [lastSync, setLastSync] = useState<number | null>(null);
   const [remoteLastModified, setRemoteLastModified] = useState<number | null>(null);
-
-  const { addToast } = useToast();
-  const { addActivityLog } = useActivityLog();
 
   const calculateAllStock = useCallback((allComponents: Component[], allLogs: InventoryLog[], prodOrders: ProductionOrder[], manOrders: ManufacturingOrder[]): Component[] => {
     const stockMap = new Map<string, number>();
@@ -149,6 +152,24 @@ export const useInventory = (): InventoryHook => {
   }, [isDirty, components, kits, inventoryLogs]);
 
   const saveChanges = useCallback(async () => {
+    if (isBlocked) {
+        addToast("Sistema bloqueado devido a detecção de loop de salvamento.", "error");
+        return;
+    }
+
+    const now = Date.now();
+    if (now - lastSaveTime.current < 2000) {
+        consecutiveRapidSaves.current += 1;
+        incrementSaveCount();
+        if (consecutiveRapidSaves.current > 5) {
+            blockSave("Múltiplas tentativas de salvamento detectadas em curto intervalo. Sistema bloqueado para proteção.");
+            return;
+        }
+    } else {
+        consecutiveRapidSaves.current = 0;
+    }
+    lastSaveTime.current = now;
+
     setSavingStatus('saving');
     setIsDirty(false);
     try {

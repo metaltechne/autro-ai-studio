@@ -22,9 +22,14 @@ import { nanoid } from 'nanoid';
 import * as api from './api';
 import { evaluateProcess, parseFastenerSku, ProcessRequirement } from './manufacturing-evaluator';
 import { useToast } from './useToast';
+import { useSaveLock } from '../contexts/SaveLockContext';
+import { useRef } from 'react';
 
 export const useManufacturing = (): ManufacturingHook => {
     const { addToast } = useToast();
+    const { isBlocked, blockSave, incrementSaveCount, saveCount } = useSaveLock();
+    const lastSaveTime = useRef(0);
+    const consecutiveRapidSaves = useRef(0);
     const [familias, setFamilias] = useState<FamiliaComponente[]>([]);
     const [workStations, setWorkStations] = useState<WorkStation[]>([]);
     const [consumables, setConsumables] = useState<Consumable[]>([]);
@@ -107,6 +112,25 @@ export const useManufacturing = (): ManufacturingHook => {
     }, [isDirty, familias, workStations, consumables, standardOperations]);
 
     const saveChanges = useCallback(async () => {
+        if (isBlocked) {
+            addToast("Sistema bloqueado devido a detecção de loop de salvamento.", "error");
+            return;
+        }
+
+        const now = Date.now();
+        if (now - lastSaveTime.current < 2000) {
+            consecutiveRapidSaves.current += 1;
+            incrementSaveCount();
+            if (consecutiveRapidSaves.current > 5) {
+                blockSave("Múltiplas tentativas de salvamento detectadas em curto intervalo. Sistema bloqueado para proteção.");
+                return;
+            }
+        } else {
+            consecutiveRapidSaves.current = 0;
+        }
+        lastSaveTime.current = now;
+
+        if (savingStatus === 'saving') return;
         setSavingStatus('saving');
         setIsDirty(false);
         try {
@@ -119,7 +143,6 @@ export const useManufacturing = (): ManufacturingHook => {
 
             await api.updateLastModified('engineering');
             
-            // Clear drafts after successful cloud save
             api.clearLocalDraft('familias');
             api.clearLocalDraft('workStations');
             api.clearLocalDraft('consumables');
@@ -135,7 +158,7 @@ export const useManufacturing = (): ManufacturingHook => {
             setIsDirty(true);
             addToast("Erro ao sincronizar dados com a nuvem.", "error");
         }
-    }, [familias, workStations, consumables, standardOperations, addToast]);
+    }, [familias, workStations, consumables, standardOperations, addToast, savingStatus]);
 
     // Auto-save to cloud
     useEffect(() => {

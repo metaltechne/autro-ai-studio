@@ -47,6 +47,8 @@ import { BottomNavBar } from './components/BottomNavBar';
 import { MobileMenuView } from './components/MobileMenuView';
 import { ActivityLogProvider, useActivityLog } from './contexts/ActivityLogContext';
 import { RolePermissionsProvider, useRolePermissionsContext } from './contexts/RolePermissionsContext';
+import { SaveLockProvider } from './contexts/SaveLockContext';
+import { SaveMonitor } from './components/ui/SaveMonitor';
 import { AIWorkerView } from './components/AIWorkerView';
 import { ActivityLogView } from './components/ActivityLogView';
 import { InspectionReceivingView } from './components/InspectionReceivingView';
@@ -458,7 +460,10 @@ const AppContent: React.FC = () => {
         <RolePermissionsProvider>
             <FinancialsProvider>
                 <ActivityLogProvider>
-                    <MainApplication />
+                    <SaveLockProvider>
+                        <MainApplication />
+                        <SaveMonitor />
+                    </SaveLockProvider>
                 </ActivityLogProvider>
             </FinancialsProvider>
         </RolePermissionsProvider>

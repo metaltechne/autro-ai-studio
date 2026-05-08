@@ -1003,10 +1003,15 @@ export const saveWorkStations = async (data: WorkStation[], skipTimestamp = fals
             throw new Error(msg);
         }
 
-        await update(dbRef, updates);
-        lastDataCache.set(DB_KEYS.workStations, JSON.stringify(data));
-        logOperation('write', `${DB_KEYS.workStations} (delta: ${changeCount})`, updates);
-        if (!skipTimestamp) await updateLastModified('engineering');
+        try {
+            await update(dbRef, updates);
+            lastDataCache.set(DB_KEYS.workStations, JSON.stringify(data));
+            logOperation('write', `${DB_KEYS.workStations} (delta: ${changeCount})`, updates);
+            if (!skipTimestamp) await updateLastModified('engineering');
+        } catch (e: any) {
+            console.error(`[Firebase] Erro ao gravar WorkStations:`, e);
+            throw e;
+        }
     }
 };
 

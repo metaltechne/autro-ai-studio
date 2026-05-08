@@ -1,10 +1,12 @@
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { PurchaseOrder, PurchaseOrdersHook, PurchaseOrderItem, InventoryLog, PurchaseRecommendation, Installment, InventoryHook, Component } from '../types';
 import * as api from './api';
 import { useActivityLog } from '../contexts/ActivityLogContext';
 // Fix: Import getComponentCost from shared evaluator.
 import { getComponentCost } from './manufacturing-evaluator';
+import { useSaveLock } from '../contexts/SaveLockContext';
+import { useToast } from './useToast';
 
 interface PurchaseOrdersHookProps {
     addMultipleInventoryLogs: (logsData: Omit<InventoryLog, 'id' | 'date'>[]) => Promise<void>;
@@ -15,7 +17,32 @@ export const usePurchaseOrders = ({ addMultipleInventoryLogs, inventoryHook }: P
     const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const { addActivityLog } = useActivityLog();
+    const { addToast } = useToast();
+    const { isBlocked, blockSave, incrementSaveCount } = useSaveLock();
+    const lastSaveTime = useRef(0);
+    const consecutiveRapidSaves = useRef(0);
     const { findComponentById } = inventoryHook;
+
+    const checkSaveLoop = useCallback(() => {
+        if (isBlocked) {
+            addToast("Sistema bloqueado devido a detecção de loop de salvamento.", "error");
+            return true;
+        }
+
+        const now = Date.now();
+        if (now - lastSaveTime.current < 2000) {
+            consecutiveRapidSaves.current += 1;
+            incrementSaveCount();
+            if (consecutiveRapidSaves.current > 5) {
+                blockSave("Múltiplas tentativas de salvamento detectadas em curto intervalo. Sistema bloqueado para proteção.");
+                return true;
+            }
+        } else {
+            consecutiveRapidSaves.current = 0;
+        }
+        lastSaveTime.current = now;
+        return false;
+    }, [isBlocked, addToast, blockSave, incrementSaveCount]);
 
     const loadData = useCallback(async () => {
         setIsLoading(true);
@@ -43,6 +70,7 @@ export const usePurchaseOrders = ({ addMultipleInventoryLogs, inventoryHook }: P
     }, [loadData]);
 
     const addPurchaseOrder = useCallback(async (recommendations: PurchaseRecommendation[], expectedDeliveryDate: string): Promise<string | null> => {
+        if (checkSaveLoop()) return null;
         const newOrderItems: PurchaseOrderItem[] = recommendations.map(rec => {
             const component = findComponentById(rec.componentId);
             const unitPrice = component ? getComponentCost(component) : 0;
@@ -78,6 +106,7 @@ export const usePurchaseOrders = ({ addMultipleInventoryLogs, inventoryHook }: P
     }, [addActivityLog, findComponentById, loadData]);
 
     const savePurchaseOrder = useCallback(async (order: PurchaseOrder) => {
+        if (checkSaveLoop()) return;
         const currentOrders = await api.getPurchaseOrders();
         let newOrders: PurchaseOrder[];
         let poCounter: number | undefined = undefined;
