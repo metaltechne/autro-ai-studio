@@ -1,8 +1,0 @@
-{
-  "name": "Remix: Estoque CRM SEGUNDO FIREBASE 2 1.2",
-  "description": "Sistema inteligente de gerenciamento de estoque e CRM com cálculo de custos de manufatura preciso, análise de viabilidade de kits e integração de processos de produção.",
-  "requestFramePermissions": [
-    "camera"
-  ],
-  "prompt": ""
-}
